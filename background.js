@@ -1,6 +1,7 @@
 // background.js (MV3 service worker)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const chunkDelay = 150;
 
 // Open side panel on icon click
 chrome.runtime.onInstalled.addListener(async () => {
@@ -17,6 +18,12 @@ chrome.action.onClicked.addListener(async (tab) => {
 
 // Pick Tab state
 let activePick = null; // { actionId, windowId }
+let runController = {
+  running: false,
+  paused: false,
+  stopRequested: false,
+  runId: 0
+};
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
@@ -35,10 +42,43 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     if (msg?.type === "RUN_FLOW") {
+      if (runController.running) {
+        runController.stopRequested = true;
+      }
       // msg: { actions: [], settings: { globalDelaySec } }
-      runFlow(msg.actions || [], msg.settings || {}).catch((e) => {
+      const runId = ++runController.runId;
+      runController = {
+        running: true,
+        paused: false,
+        stopRequested: false,
+        runId
+      };
+      runFlow(msg.actions || [], msg.settings || {}, runId).catch((e) => {
         chrome.runtime.sendMessage({ type: "FLOW_ERROR", error: String(e?.message || e) });
       });
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (msg?.type === "PAUSE_FLOW") {
+      runController.paused = true;
+      chrome.runtime.sendMessage({ type: "FLOW_PAUSE" });
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (msg?.type === "RESUME_FLOW") {
+      runController.paused = false;
+      chrome.runtime.sendMessage({ type: "FLOW_RESUME" });
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (msg?.type === "STOP_FLOW") {
+      runController.stopRequested = true;
+      runController.paused = false;
+      runController.running = false;
+      chrome.runtime.sendMessage({ type: "FLOW_STOP" });
       sendResponse({ ok: true });
       return;
     }
@@ -75,40 +115,97 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
   });
 });
 
-async function runFlow(actions, settings) {
+async function runFlow(actions, settings, runId) {
   // Normalize
   const globalDelayMs = Math.max(0, Number(settings.globalDelaySec ?? 0.2)) * 1000;
+  const loopEnabled = actions.some((action) => action.type === "simpleLoop" && action.enabled !== false);
 
-  chrome.runtime.sendMessage({ type: "FLOW_START" });
+  let shouldLoop = true;
+  while (shouldLoop) {
+    if (!isActiveRun(runId)) return;
+    chrome.runtime.sendMessage({ type: "FLOW_START" });
 
-  for (let i = 0; i < actions.length; i++) {
-    const step = actions[i];
+    for (let i = 0; i < actions.length; i++) {
+      const step = actions[i];
+      if (!isActiveRun(runId)) return;
+      await waitIfPaused(runId);
+      if (!isActiveRun(runId)) return;
 
-    chrome.runtime.sendMessage({ type: "FLOW_STEP_START", actionId: step.id, index: i });
+      chrome.runtime.sendMessage({ type: "FLOW_STEP_START", actionId: step.id, index: i });
 
-    if (step.type === "switchTab") {
-      const tabId = step.tab?.tabId;
-      if (typeof tabId !== "number") throw new Error("Switch Tab node missing tabId.");
+      if (step.type === "switchTab") {
+        const tabId = step.tab?.tabId;
+        if (typeof tabId !== "number") throw new Error("Switch Tab node missing tabId.");
 
-      // Activate tab
-      await chrome.tabs.update(tabId, { active: true });
+        // Activate tab
+        await chrome.tabs.update(tabId, { active: true });
 
-      // Give the browser a moment to actually switch visually
-      await sleep(150);
+        // Give the browser a moment to actually switch visually
+        await sleep(150);
+      }
+
+      if (step.type === "delay") {
+        const ms = Math.max(0, Number(step.delaySec ?? 1)) * 1000;
+        await sleepWithPause(ms, runId);
+      }
+
+      if (step.type === "openUrl") {
+        const url = step.url;
+        if (!url) throw new Error("Open URL node missing a URL.");
+        const tab = await getActiveTab();
+        if (!tab) throw new Error("No active tab to navigate.");
+        await chrome.tabs.update(tab.id, { url });
+      }
+
+      if (step.type === "reloadTab") {
+        const tab = await getActiveTab();
+        if (!tab) throw new Error("No active tab to reload.");
+        await chrome.tabs.reload(tab.id);
+      }
+
+      if (step.type === "simpleLoop") {
+        await sleepWithPause(0, runId);
+      }
+
+      chrome.runtime.sendMessage({ type: "FLOW_STEP_END", actionId: step.id, index: i });
+
+      // Global delay between steps (don’t add extra after last)
+      if (i !== actions.length - 1 && globalDelayMs > 0) {
+        await sleepWithPause(globalDelayMs, runId);
+      }
     }
 
-    if (step.type === "delay") {
-      const ms = Math.max(0, Number(step.delaySec ?? 1)) * 1000;
-      await sleep(ms);
-    }
-
-    chrome.runtime.sendMessage({ type: "FLOW_STEP_END", actionId: step.id, index: i });
-
-    // Global delay between steps (don’t add extra after last)
-    if (i !== actions.length - 1 && globalDelayMs > 0) {
-      await sleep(globalDelayMs);
+    if (!loopEnabled || !isActiveRun(runId)) {
+      shouldLoop = false;
     }
   }
 
+  if (!isActiveRun(runId)) return;
   chrome.runtime.sendMessage({ type: "FLOW_END" });
+  runController.running = false;
+}
+
+function isActiveRun(runId) {
+  return runController.runId === runId && !runController.stopRequested;
+}
+
+async function waitIfPaused(runId) {
+  while (runController.paused && isActiveRun(runId)) {
+    await sleep(chunkDelay);
+  }
+}
+
+async function sleepWithPause(ms, runId) {
+  let remaining = ms;
+  while (remaining > 0 && isActiveRun(runId)) {
+    await waitIfPaused(runId);
+    const slice = Math.min(chunkDelay, remaining);
+    await sleep(slice);
+    remaining -= slice;
+  }
+}
+
+async function getActiveTab() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tabs?.[0] ?? null;
 }

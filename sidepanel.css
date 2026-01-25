@@ -7,6 +7,7 @@
   --line: rgba(255, 255, 255, 0.08);
   --accent: #7c5cff;
   --danger: #ff4d4d;
+  --warning: #fbbf24;
   --shadow: 0 10px 30px rgba(0,0,0,0.35);
   --radius: 14px;
   --radius2: 18px;
@@ -37,7 +38,7 @@ html, body {
   justify-content: space-between;
   padding: 12px var(--pad);
   border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(124,92,255,0.12), transparent);
+  background: linear-gradient(180deg, rgba(124,92,255,0.16), rgba(12,14,20,0.6));
 }
 
 .brand {
@@ -96,6 +97,10 @@ html, body {
   gap: 10px;
   align-items: stretch;
 }
+.tItem.dragging .card {
+  opacity: 0.55;
+  transform: scale(0.995);
+}
 
 .tRail {
   position: relative;
@@ -130,7 +135,6 @@ html, body {
   background: rgba(124, 92, 255, 0.95);
   transform: scale(1.15);
   box-shadow: 0 0 0 6px rgba(124, 92, 255, 0.16);
-  animation: pulse 900ms ease-in-out infinite;
 }
 
 .tItem.done .tDot {
@@ -140,9 +144,20 @@ html, body {
   animation: none;
 }
 
+.tItem.paused .tDot {
+  background: rgba(251, 191, 36, 0.95);
+  border-color: rgba(251, 191, 36, 0.65);
+  animation: pausePulse 900ms ease-in-out infinite;
+}
+
 @keyframes pulse {
   0%, 100% { box-shadow: 0 0 0 6px rgba(124, 92, 255, 0.10); }
   50% { box-shadow: 0 0 0 10px rgba(124, 92, 255, 0.18); }
+}
+
+@keyframes pausePulse {
+  0%, 100% { box-shadow: 0 0 0 6px rgba(251, 191, 36, 0.15); }
+  50% { box-shadow: 0 0 0 12px rgba(251, 191, 36, 0.3); }
 }
 
 /* --- buttons --- */
@@ -157,20 +172,27 @@ html, body {
   cursor: pointer;
   transition: transform 120ms ease, background 120ms ease, border 120ms ease;
 }
+.iconBtn.danger {
+  border-color: rgba(255, 77, 77, 0.3);
+  background: rgba(255, 77, 77, 0.12);
+}
 .iconBtn:hover {
   background: rgba(124,92,255,0.12);
   border-color: rgba(124,92,255,0.35);
   transform: translateY(-1px);
 }
-.iconBtn svg {
-  width: 20px;
-  height: 20px;
-  fill: currentColor;
+.iconBtn.danger:hover {
+  background: rgba(255, 77, 77, 0.2);
+  border-color: rgba(255, 77, 77, 0.5);
 }
 .iconBtn.small {
   width: 34px;
   height: 34px;
   border-radius: 12px;
+}
+.material-icons {
+  font-size: 20px;
+  line-height: 1;
 }
 
 /* --- cards --- */
@@ -196,6 +218,9 @@ html, body {
   cursor: pointer;
   user-select: none;
 }
+.cardHeader.dragging {
+  opacity: 0.6;
+}
 
 .caret {
   width: 18px;
@@ -205,8 +230,29 @@ html, body {
   opacity: 0.9;
   transition: transform 160ms ease;
 }
-.caret svg { width: 18px; height: 18px; fill: currentColor; }
+.caret .material-icons { font-size: 18px; }
 .card.collapsed .caret { transform: rotate(-90deg); }
+
+.dragHandle {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px dashed transparent;
+  cursor: grab;
+  color: var(--muted);
+}
+.dragHandle:active {
+  cursor: grabbing;
+}
+.dragHandle:hover {
+  border-color: rgba(124, 92, 255, 0.35);
+  color: var(--text);
+}
+.dragHandle .material-icons {
+  font-size: 18px;
+}
 
 .headerTitle {
   flex: 1;
@@ -247,7 +293,7 @@ html, body {
   background: rgba(255, 77, 77, 0.12);
   border-color: rgba(255, 77, 77, 0.25);
 }
-.deleteBtn svg { width: 18px; height: 18px; fill: var(--danger); }
+.deleteBtn .material-icons { font-size: 18px; color: var(--danger); }
 
 .cardBody {
   padding: 12px;
@@ -283,6 +329,17 @@ html, body {
 }
 .btn.primary:hover {
   background: rgba(124,92,255,0.22);
+}
+
+.btn.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+.btn.toggle.active {
+  border-color: rgba(124, 92, 255, 0.5);
+  background: rgba(124, 92, 255, 0.2);
 }
 
 .pill {
