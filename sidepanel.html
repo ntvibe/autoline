@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Autoline</title>
     <link rel="stylesheet" href="sidepanel.css" />
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
   </head>
   <body>
     <div class="app">
@@ -17,25 +18,22 @@
         <div class="topbarBtns">
           <!-- Play -->
           <button id="playBtn" class="iconBtn" title="Play" aria-label="Play">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M8 5v14l11-7z"></path>
-            </svg>
+            <span class="material-icons" aria-hidden="true">play_arrow</span>
+          </button>
+
+          <!-- Stop -->
+          <button id="stopBtn" class="iconBtn danger" title="Stop" aria-label="Stop">
+            <span class="material-icons" aria-hidden="true">stop</span>
           </button>
 
           <!-- Settings (wrench) -->
           <button id="settingsBtn" class="iconBtn" title="Settings" aria-label="Settings">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M22.7 19.3 20 16.6c.2-.6.3-1.2.3-1.8 0-.6-.1-1.2-.3-1.8l2.7-2.7-2-2-2.7 2.7c-.6-.2-1.2-.3-1.8-.3-.6 0-1.2.1-1.8.3L11.7 6.3l-2 2 2.7 2.7c-.2.6-.3 1.2-.3 1.8 0 .6.1 1.2.3 1.8l-2.7 2.7 2 2 2.7-2.7c.6.2 1.2.3 1.8.3.6 0 1.2-.1 1.8-.3l2.7 2.7 2-2zM16.2 16.6c-1 0-1.8-.8-1.8-1.8s.8-1.8 1.8-1.8 1.8.8 1.8 1.8-.8 1.8-1.8 1.8z"
-              ></path>
-            </svg>
+            <span class="material-icons" aria-hidden="true">settings</span>
           </button>
 
           <!-- Add Node -->
           <button id="addNodeBtn" class="iconBtn" title="Add Node" aria-label="Add Node">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M19 11H13V5h-2v6H5v2h6v6h2v-6h6z"></path>
-            </svg>
+            <span class="material-icons" aria-hidden="true">add</span>
           </button>
         </div>
       </header>
@@ -53,9 +51,7 @@
           <div class="modalHeader">
             <div class="modalTitle">Add Node</div>
             <button id="closeModalBtn" class="iconBtn small" aria-label="Close">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7 4.3 4.3l6.3 6.3 6.3-6.3z"></path>
-              </svg>
+              <span class="material-icons" aria-hidden="true">close</span>
             </button>
           </div>
 
@@ -69,6 +65,21 @@
               <div class="nodeName">Delay</div>
               <div class="nodeHint">Wait before the next action</div>
             </button>
+
+            <button id="addOpenUrlNode" class="nodeItem">
+              <div class="nodeName">Open URL</div>
+              <div class="nodeHint">Navigate the active tab to a URL</div>
+            </button>
+
+            <button id="addReloadTabNode" class="nodeItem">
+              <div class="nodeName">Reload Tab</div>
+              <div class="nodeHint">Refresh the active tab</div>
+            </button>
+
+            <button id="addSimpleLoopNode" class="nodeItem">
+              <div class="nodeName">Simple Loop</div>
+              <div class="nodeHint">Repeat the entire flow until stopped</div>
+            </button>
           </div>
         </div>
       </div>
@@ -79,9 +90,7 @@
           <div class="modalHeader">
             <div class="modalTitle">Settings</div>
             <button id="closeSettingsBtn" class="iconBtn small" aria-label="Close">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7 4.3 4.3l6.3 6.3 6.3-6.3z"></path>
-              </svg>
+              <span class="material-icons" aria-hidden="true">close</span>
             </button>
           </div>
 

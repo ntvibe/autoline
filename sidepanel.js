@@ -1,11 +1,15 @@
 const addNodeBtn = document.getElementById("addNodeBtn");
 const settingsBtn = document.getElementById("settingsBtn");
 const playBtn = document.getElementById("playBtn");
+const stopBtn = document.getElementById("stopBtn");
 
 const modalBackdrop = document.getElementById("modalBackdrop");
 const closeModalBtn = document.getElementById("closeModalBtn");
 const addSwitchTabNode = document.getElementById("addSwitchTabNode");
 const addDelayNode = document.getElementById("addDelayNode");
+const addOpenUrlNode = document.getElementById("addOpenUrlNode");
+const addReloadTabNode = document.getElementById("addReloadTabNode");
+const addSimpleLoopNode = document.getElementById("addSimpleLoopNode");
 
 const settingsBackdrop = document.getElementById("settingsBackdrop");
 const closeSettingsBtn = document.getElementById("closeSettingsBtn");
@@ -22,11 +26,11 @@ let state = {
   },
   actions: []
   // action:
-  // { id, type: "switchTab"|"delay", collapsed: true, jsonOpen: false, tab?, delaySec? }
+  // { id, type: "switchTab"|"delay"|"openUrl"|"reloadTab"|"simpleLoop", collapsed: true, jsonOpen: false }
 };
 
 let runState = {
-  running: false,
+  status: "idle",
   currentId: null,
   doneIds: new Set()
 };
@@ -54,6 +58,8 @@ async function loadState() {
     if (typeof a.collapsed !== "boolean") a.collapsed = true;
     if (typeof a.jsonOpen !== "boolean") a.jsonOpen = false;
     if (a.type === "delay" && typeof a.delaySec !== "number") a.delaySec = 1;
+    if (a.type === "openUrl" && typeof a.url !== "string") a.url = "";
+    if (a.type === "simpleLoop" && typeof a.enabled !== "boolean") a.enabled = true;
   }
 
   render();
@@ -116,13 +122,51 @@ addDelayNode.addEventListener("click", async () => {
   showStatus("✅ Delay node added");
 });
 
+addOpenUrlNode.addEventListener("click", async () => {
+  const action = { id: uid(), type: "openUrl", collapsed: true, jsonOpen: false, url: "" };
+  state.actions.push(action);
+  await saveState();
+  render();
+  closeModal();
+  showStatus("✅ Open URL node added");
+});
+
+addReloadTabNode.addEventListener("click", async () => {
+  const action = { id: uid(), type: "reloadTab", collapsed: true, jsonOpen: false };
+  state.actions.push(action);
+  await saveState();
+  render();
+  closeModal();
+  showStatus("✅ Reload Tab node added");
+});
+
+addSimpleLoopNode.addEventListener("click", async () => {
+  const action = { id: uid(), type: "simpleLoop", collapsed: true, jsonOpen: false, enabled: true };
+  state.actions.push(action);
+  await saveState();
+  render();
+  closeModal();
+  showStatus("✅ Simple Loop node added");
+});
+
 playBtn.addEventListener("click", async () => {
-  if (runState.running) {
-    showStatus("⏳ Already running…");
+  if (runState.status === "running") {
+    await chrome.runtime.sendMessage({ type: "PAUSE_FLOW" });
+    runState.status = "paused";
+    render();
+    showStatus("⏸️ Paused");
     return;
   }
 
-  // Basic validation for switchTab nodes
+  if (runState.status === "paused") {
+    await chrome.runtime.sendMessage({ type: "RESUME_FLOW" });
+    runState.status = "running";
+    render();
+    showStatus("▶️ Resumed");
+    return;
+  }
+
+  // Basic validation for switchTab/openUrl nodes
   for (const a of state.actions) {
     if (a.type === "switchTab" && !a.tab?.tabId) {
       showStatus("⚠️ A Switch Tab node has no tab selected");
@@ -131,9 +175,16 @@ playBtn.addEventListener("click", async () => {
       render();
       return;
     }
+    if (a.type === "openUrl" && !a.url?.trim()) {
+      showStatus("⚠️ An Open URL node is missing a URL");
+      a.collapsed = false;
+      await saveState();
+      render();
+      return;
+    }
   }
 
-  runState.running = true;
+  runState.status = "running";
   runState.currentId = null;
   runState.doneIds = new Set();
   render();
@@ -147,19 +198,30 @@ playBtn.addEventListener("click", async () => {
   showStatus("▶️ Running flow…", 1200);
 });
 
+stopBtn.addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({ type: "STOP_FLOW" });
+  runState.status = "idle";
+  runState.currentId = null;
+  runState.doneIds = new Set();
+  render();
+  showStatus("⏹️ Stopped");
+});
+
 function iconChevron() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M8.59 16.59 13.17 12 8.59 7.41 10 6l6 6-6 6z"></path>
-    </svg>
+    <span class="material-icons" aria-hidden="true">chevron_right</span>
   `;
 }
 
 function iconClose() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7 4.3 4.3l6.3 6.3 6.3-6.3z"></path>
-    </svg>
+    <span class="material-icons" aria-hidden="true">close</span>
+  `;
+}
+
+function iconDelete() {
+  return `
+    <span class="material-icons" aria-hidden="true">delete</span>
   `;
 }
 
@@ -175,6 +237,15 @@ function buildJsonForAction(action) {
   if (action.type === "delay") {
     return { type: "delay", delaySec: action.delaySec ?? 1 };
   }
+  if (action.type === "openUrl") {
+    return { type: "openUrl", url: action.url ?? "" };
+  }
+  if (action.type === "reloadTab") {
+    return { type: "reloadTab" };
+  }
+  if (action.type === "simpleLoop") {
+    return { type: "simpleLoop", enabled: action.enabled ?? true };
+  }
   return { type: action.type };
 }
 
@@ -186,20 +257,25 @@ function render() {
     empty.className = "pill";
     empty.textContent = "No actions yet. Click + to add a node.";
     actionsList.appendChild(empty);
+    setPlayButtonState();
     return;
   }
 
   state.actions.forEach((action, idx) => {
     actionsList.appendChild(renderTimelineItem(action, idx, idx === state.actions.length - 1));
   });
+
+  setPlayButtonState();
 }
 
 function renderTimelineItem(action, idx, isLast) {
   const tItem = document.createElement("div");
   tItem.className = "tItem";
+  tItem.dataset.actionId = action.id;
 
   // Running visuals
-  if (runState.running && runState.currentId === action.id) tItem.classList.add("running");
+  if (runState.status === "running" && runState.currentId === action.id) tItem.classList.add("running");
+  if (runState.status === "paused" && runState.currentId === action.id) tItem.classList.add("paused");
   if (runState.doneIds.has(action.id)) tItem.classList.add("done");
 
   const rail = document.createElement("div");
@@ -222,20 +298,44 @@ function renderTimelineItem(action, idx, isLast) {
   const header = document.createElement("div");
   header.className = "cardHeader";
 
+  const dragHandle = document.createElement("div");
+  dragHandle.className = "dragHandle";
+  dragHandle.setAttribute("aria-label", "Drag to reorder");
+  dragHandle.innerHTML = `<span class="material-icons" aria-hidden="true">drag_indicator</span>`;
+  dragHandle.draggable = true;
+  dragHandle.addEventListener("click", (e) => e.stopPropagation());
+
   const caret = document.createElement("div");
   caret.className = "caret";
   caret.innerHTML = iconChevron();
 
   const title = document.createElement("div");
   title.className = "headerTitle";
-  title.textContent = action.type === "switchTab" ? "Switch Tab" : "Delay";
+  if (action.type === "switchTab") title.textContent = "Switch Tab";
+  if (action.type === "delay") title.textContent = "Delay";
+  if (action.type === "openUrl") title.textContent = "Open URL";
+  if (action.type === "reloadTab") title.textContent = "Reload Tab";
+  if (action.type === "simpleLoop") title.textContent = "Simple Loop";
 
   const sub = document.createElement("span");
   sub.className = "headerSub";
-  sub.textContent =
-    action.type === "switchTab"
-      ? (action.tab ? `• ${truncate(action.tab.title || action.tab.url || "Tab")}` : "• not set")
-      : `• ${Number(action.delaySec ?? 1)} sec`;
+  if (action.type === "switchTab") {
+    sub.textContent = action.tab
+      ? `• ${truncate(action.tab.title || action.tab.url || "Tab")}`
+      : "• not set";
+  }
+  if (action.type === "delay") {
+    sub.textContent = `• ${Number(action.delaySec ?? 1)} sec`;
+  }
+  if (action.type === "openUrl") {
+    sub.textContent = action.url ? `• ${truncate(action.url, 32)}` : "• not set";
+  }
+  if (action.type === "reloadTab") {
+    sub.textContent = "• active tab";
+  }
+  if (action.type === "simpleLoop") {
+    sub.textContent = action.enabled ? "• enabled" : "• disabled";
+  }
 
   const headerRight = document.createElement("div");
   headerRight.className = "headerRight";
@@ -243,7 +343,7 @@ function renderTimelineItem(action, idx, isLast) {
   const del = document.createElement("button");
   del.className = "deleteBtn";
   del.setAttribute("aria-label", "Delete action");
-  del.innerHTML = iconClose();
+  del.innerHTML = iconDelete();
 
   del.addEventListener("click", async (e) => {
     e.stopPropagation();
@@ -255,6 +355,7 @@ function renderTimelineItem(action, idx, isLast) {
 
   headerRight.appendChild(del);
 
+  header.appendChild(dragHandle);
   header.appendChild(caret);
   header.appendChild(title);
   header.appendChild(sub);
@@ -326,11 +427,60 @@ function renderTimelineItem(action, idx, isLast) {
     left.appendChild(input);
   }
 
+  if (action.type === "openUrl") {
+    const label = document.createElement("div");
+    label.className = "pill";
+    label.textContent = "Target URL";
+
+    const input = document.createElement("input");
+    input.className = "input";
+    input.type = "text";
+    input.placeholder = "https://example.com";
+    input.style.minWidth = "220px";
+    input.value = action.url ?? "";
+
+    input.addEventListener("change", async () => {
+      action.url = input.value.trim();
+      await saveState();
+      render();
+    });
+
+    left.appendChild(label);
+    left.appendChild(input);
+  }
+
+  if (action.type === "reloadTab") {
+    const label = document.createElement("div");
+    label.className = "pill";
+    label.textContent = "Reload the active tab.";
+    left.appendChild(label);
+  }
+
+  if (action.type === "simpleLoop") {
+    const label = document.createElement("div");
+    label.className = "pill";
+    label.textContent = "Loop the entire flow";
+
+    const toggle = document.createElement("button");
+    toggle.className = "btn toggle" + (action.enabled ? " active" : "");
+    toggle.type = "button";
+    toggle.textContent = action.enabled ? "Enabled" : "Disabled";
+
+    toggle.addEventListener("click", async () => {
+      action.enabled = !action.enabled;
+      await saveState();
+      render();
+    });
+
+    left.appendChild(label);
+    left.appendChild(toggle);
+  }
+
   const del2 = document.createElement("button");
   del2.className = "deleteBtn";
   del2.setAttribute("aria-label", "Delete action");
   del2.style.opacity = "1";
-  del2.innerHTML = iconClose();
+  del2.innerHTML = iconDelete();
   del2.addEventListener("click", async () => {
     state.actions = state.actions.filter((a) => a.id !== action.id);
     await saveState();
@@ -374,6 +524,36 @@ function renderTimelineItem(action, idx, isLast) {
   tItem.appendChild(rail);
   tItem.appendChild(card);
 
+  dragHandle.addEventListener("dragstart", (e) => {
+    e.dataTransfer.setData("text/plain", action.id);
+    e.dataTransfer.effectAllowed = "move";
+    tItem.classList.add("dragging");
+  });
+
+  dragHandle.addEventListener("dragend", () => {
+    tItem.classList.remove("dragging");
+  });
+
+  tItem.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  });
+
+  tItem.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    const draggedId = e.dataTransfer.getData("text/plain");
+    if (!draggedId || draggedId === action.id) return;
+    const fromIndex = state.actions.findIndex((a) => a.id === draggedId);
+    const toIndex = state.actions.findIndex((a) => a.id === action.id);
+    if (fromIndex < 0 || toIndex < 0) return;
+
+    const [moved] = state.actions.splice(fromIndex, 1);
+    state.actions.splice(toIndex, 0, moved);
+    await saveState();
+    render();
+    showStatus("↕️ Action reordered");
+  });
+
   return tItem;
 }
 
@@ -397,7 +577,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 
   if (msg?.type === "FLOW_START") {
-    runState.running = true;
+    runState.status = "running";
     runState.currentId = null;
     runState.doneIds = new Set();
     render();
@@ -415,19 +595,51 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 
   if (msg?.type === "FLOW_END") {
-    runState.running = false;
+    runState.status = "idle";
     runState.currentId = null;
     render();
     showStatus("✅ Flow complete");
   }
 
+  if (msg?.type === "FLOW_PAUSE") {
+    runState.status = "paused";
+    render();
+  }
+
+  if (msg?.type === "FLOW_RESUME") {
+    runState.status = "running";
+    render();
+  }
+
+  if (msg?.type === "FLOW_STOP") {
+    runState.status = "idle";
+    runState.currentId = null;
+    runState.doneIds = new Set();
+    render();
+    showStatus("⏹️ Flow stopped");
+  }
+
   if (msg?.type === "FLOW_ERROR") {
-    runState.running = false;
+    runState.status = "idle";
     runState.currentId = null;
     render();
     showStatus("❌ Flow error: " + msg.error, 3500);
   }
 });
+
+function setPlayButtonState() {
+  const icon = playBtn.querySelector(".material-icons");
+  if (runState.status === "running") {
+    icon.textContent = "pause";
+    playBtn.title = "Pause";
+    playBtn.setAttribute("aria-label", "Pause");
+    return;
+  }
+
+  icon.textContent = "play_arrow";
+  playBtn.title = runState.status === "paused" ? "Resume" : "Play";
+  playBtn.setAttribute("aria-label", runState.status === "paused" ? "Resume" : "Play");
+}
 
 // Boot
 loadState();
