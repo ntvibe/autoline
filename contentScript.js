@@ -479,27 +479,6 @@
     pointerState.visible = false;
   }
 
-  function dispatchClick(target, x, y, count = 1) {
-    const safeCount = Math.min(3, Math.max(1, Number(count) || 1));
-    for (let index = 1; index <= safeCount; index += 1) {
-      const baseEventInit = {
-        bubbles: true,
-        cancelable: true,
-        clientX: x,
-        clientY: y,
-        view: window,
-        detail: index
-      };
-      target.dispatchEvent(new MouseEvent("mousemove", baseEventInit));
-      target.dispatchEvent(new MouseEvent("mousedown", baseEventInit));
-      target.dispatchEvent(new MouseEvent("mouseup", baseEventInit));
-      target.dispatchEvent(new MouseEvent("click", baseEventInit));
-      if (index === 2) {
-        target.dispatchEvent(new MouseEvent("dblclick", baseEventInit));
-      }
-    }
-  }
-
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === "ARM_CLICK_RECORD") {
       ensureStyles();
@@ -603,26 +582,11 @@
       return true;
     }
 
-    if (msg?.type === "PERFORM_CLICK") {
-      (async () => {
-        const ensured = await ensureClickVisible(msg.action);
-        if (!ensured?.resolved) {
-          sendResponse({ ok: false });
-          return;
-        }
-        const x = ensured.resolved.click.x;
-        const y = ensured.resolved.click.y;
-        const clickCount = Math.min(3, Math.max(1, Number(msg.action?.clickCount) || 1));
-        if (msg.showDot !== false) {
-          showClickIndicator(x, y);
-        }
-        const target = document.elementFromPoint(x, y) || ensured.resolved.target;
-        try {
-          target.focus?.({ preventScroll: true });
-        } catch (e) {}
-        dispatchClick(target, x, y, clickCount);
-        sendResponse({ ok: true, x, y });
-      })();
+    if (msg?.type === "SHOW_CLICK_DOT") {
+      if (msg.showDot !== false) {
+        showClickIndicator(msg.x, msg.y);
+      }
+      sendResponse({ ok: true });
       return true;
     }
 
