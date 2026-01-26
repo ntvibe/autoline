@@ -175,26 +175,57 @@ async function runFlow(actions, settings, runId) {
         if (!tab) throw new Error("No active tab to click.");
         const resolved = await resolveClickTarget(tab.id, step);
         if (!resolved?.ok) throw new Error("Click target not found on the page.");
+        const clickX = resolved.click.x;
+        const clickY = resolved.click.y;
 
         if (!pointerVisible) {
+          const centerX = (resolved.viewport?.width ?? 0) / 2 || clickX;
+          const centerY = (resolved.viewport?.height ?? 0) / 2 || clickY;
           await sendMessageToTab(tab.id, {
             type: "POINTER_SHOW",
-            x: resolved.click.x,
-            y: resolved.click.y,
+            x: centerX,
+            y: centerY,
             settings,
             fadeIn: true
           });
           pointerVisible = true;
+          if (globalDelayMs > 0) {
+            await sendMessageToTab(tab.id, {
+              type: "POINTER_MOVE",
+              x: clickX,
+              y: clickY,
+              duration: globalDelayMs,
+              settings
+            });
+            await sleepWithPause(globalDelayMs, runId);
+          } else {
+            await sendMessageToTab(tab.id, {
+              type: "POINTER_SNAP",
+              x: clickX,
+              y: clickY,
+              settings
+            });
+          }
         } else {
           await sendMessageToTab(tab.id, {
             type: "POINTER_SNAP",
-            x: resolved.click.x,
-            y: resolved.click.y,
+            x: clickX,
+            y: clickY,
             settings
           });
         }
 
-        await sendMessageToTab(tab.id, { type: "PERFORM_CLICK", action: step });
+        await sendMessageToTab(tab.id, {
+          type: "PERFORM_CLICK",
+          action: step,
+          showDot: step.showClickDot !== false
+        });
+
+        const hasMoreClicks = actions.slice(i + 1).some((action) => action.type === "click");
+        if (!hasMoreClicks) {
+          await sendMessageToTab(tab.id, { type: "POINTER_HIDE" });
+          pointerVisible = false;
+        }
       }
 
       if (step.type === "reloadTab") {

@@ -24,6 +24,8 @@ const pointerOutlineColorInput = document.getElementById("pointerOutlineColorInp
 const pointerShadowToggle = document.getElementById("pointerShadowToggle");
 const pointerShadowOpacityInput = document.getElementById("pointerShadowOpacityInput");
 const pointerShadowBlurInput = document.getElementById("pointerShadowBlurInput");
+const pointerPreview = document.getElementById("pointerPreview");
+const pointerPreviewPointer = document.getElementById("pointerPreviewPointer");
 
 const actionsList = document.getElementById("actionsList");
 const statusEl = document.getElementById("status");
@@ -97,6 +99,7 @@ async function loadState() {
     if (a.type === "click") {
       if (!a.target) a.target = null;
       if (!a.click) a.click = null;
+      if (typeof a.showClickDot !== "boolean") a.showClickDot = true;
     }
     if (a.type === "simpleLoop" && typeof a.enabled !== "boolean") a.enabled = true;
   }
@@ -126,10 +129,51 @@ function openSettings() {
   pointerShadowToggle.checked = state.settings.pointerShadowEnabled !== false;
   pointerShadowOpacityInput.value = String(Math.round((state.settings.pointerShadowOpacity ?? 0.25) * 100));
   pointerShadowBlurInput.value = String(state.settings.pointerShadowBlur ?? 8);
+  updatePointerPreviewFromInputs();
   settingsBackdrop.classList.remove("hidden");
 }
 function closeSettings() {
   settingsBackdrop.classList.add("hidden");
+}
+
+function getPointerPreviewSettings() {
+  const pointerSize = Number(pointerSizeInput.value);
+  const outlineSize = Number(pointerOutlineInput.value);
+  const shadowOpacity = Number(pointerShadowOpacityInput.value);
+  const shadowBlur = Number(pointerShadowBlurInput.value);
+  return {
+    pointerSizePx: Number.isFinite(pointerSize) && pointerSize > 0 ? pointerSize : 32,
+    pointerFill: pointerFillInput.value || "#000000",
+    pointerOutlinePx: Number.isFinite(outlineSize) && outlineSize >= 0 ? outlineSize : 2,
+    pointerOutlineColor: pointerOutlineColorInput.value || "#ffffff",
+    pointerShadowEnabled: pointerShadowToggle.checked,
+    pointerShadowOpacity: Number.isFinite(shadowOpacity) ? Math.min(1, Math.max(0, shadowOpacity / 100)) : 0.25,
+    pointerShadowBlur: Number.isFinite(shadowBlur) && shadowBlur >= 0 ? shadowBlur : 8
+  };
+}
+
+function updatePointerPreviewFromInputs() {
+  if (!pointerPreviewPointer || !pointerPreview) return;
+  const settings = getPointerPreviewSettings();
+  const svg = pointerPreviewPointer.querySelector("svg");
+  const path = svg?.querySelector("path");
+  const containerSize = Math.min(pointerPreview.clientWidth || 160, pointerPreview.clientHeight || 120);
+  const maxSize = Math.max(16, containerSize - 32);
+  const size = Math.min(settings.pointerSizePx, maxSize);
+
+  pointerPreviewPointer.style.width = `${size}px`;
+  pointerPreviewPointer.style.height = `${size}px`;
+
+  if (path) {
+    path.setAttribute("fill", settings.pointerFill);
+    path.setAttribute("stroke", settings.pointerOutlineColor);
+    path.setAttribute("stroke-width", String(settings.pointerOutlinePx));
+    path.setAttribute("stroke-linejoin", "round");
+  }
+
+  pointerPreviewPointer.style.filter = settings.pointerShadowEnabled
+    ? `drop-shadow(0 0 ${settings.pointerShadowBlur}px rgba(0, 0, 0, ${settings.pointerShadowOpacity}))`
+    : "none";
 }
 
 addNodeBtn.addEventListener("click", openModal);
@@ -143,6 +187,18 @@ modalBackdrop.addEventListener("click", (e) => {
 settingsBackdrop.addEventListener("click", (e) => {
   if (e.target === settingsBackdrop) closeSettings();
 });
+
+[
+  pointerSizeInput,
+  pointerFillInput,
+  pointerOutlineInput,
+  pointerOutlineColorInput,
+  pointerShadowOpacityInput,
+  pointerShadowBlurInput
+].forEach((input) => {
+  input.addEventListener("input", updatePointerPreviewFromInputs);
+});
+pointerShadowToggle.addEventListener("change", updatePointerPreviewFromInputs);
 
 saveSettingsBtn.addEventListener("click", async () => {
   const v = Number(globalDelayInput.value);
@@ -195,7 +251,15 @@ addOpenUrlNode.addEventListener("click", async () => {
 });
 
 addClickNode.addEventListener("click", async () => {
-  const action = { id: uid(), type: "click", collapsed: true, jsonOpen: false, target: null, click: null };
+  const action = {
+    id: uid(),
+    type: "click",
+    collapsed: true,
+    jsonOpen: false,
+    target: null,
+    click: null,
+    showClickDot: true
+  };
   state.actions.push(action);
   await saveState();
   render();
@@ -323,7 +387,8 @@ function buildJsonForAction(action) {
     return {
       type: "click",
       target: action.target ?? null,
-      click: action.click ?? null
+      click: action.click ?? null,
+      showClickDot: action.showClickDot !== false
     };
   }
   if (action.type === "reloadTab") {
@@ -352,6 +417,12 @@ function render() {
   });
 
   setPlayButtonState();
+}
+
+function clearDropIndicators() {
+  actionsList.querySelectorAll(".tItem.drop-before, .tItem.drop-after").forEach((item) => {
+    item.classList.remove("drop-before", "drop-after");
+  });
 }
 
 function renderTimelineItem(action, idx, isLast) {
@@ -592,10 +663,26 @@ function renderTimelineItem(action, idx, isLast) {
       ? `Recorded: ${truncate(action.target.label || action.target.selectors?.[0] || "target", 36)}`
       : "No click recorded";
 
+    const dotLabel = document.createElement("div");
+    dotLabel.className = "pill";
+    dotLabel.textContent = "Click dot on playback";
+
+    const dotToggle = document.createElement("button");
+    dotToggle.className = "btn toggle" + (action.showClickDot !== false ? " active" : "");
+    dotToggle.type = "button";
+    dotToggle.textContent = action.showClickDot !== false ? "On" : "Off";
+    dotToggle.addEventListener("click", async () => {
+      action.showClickDot = !(action.showClickDot !== false);
+      await saveState();
+      render();
+    });
+
     left.appendChild(recordBtn);
     left.appendChild(showBtn);
     left.appendChild(resetBtn);
     left.appendChild(pill);
+    left.appendChild(dotLabel);
+    left.appendChild(dotToggle);
   }
 
   if (action.type === "reloadTab") {
@@ -677,27 +764,45 @@ function renderTimelineItem(action, idx, isLast) {
     e.dataTransfer.setData("text/plain", action.id);
     e.dataTransfer.effectAllowed = "move";
     tItem.classList.add("dragging");
+    clearDropIndicators();
   });
 
   dragHandle.addEventListener("dragend", () => {
     tItem.classList.remove("dragging");
+    clearDropIndicators();
   });
 
   tItem.addEventListener("dragover", (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
+    const rect = tItem.getBoundingClientRect();
+    const before = e.clientY < rect.top + rect.height / 2;
+    clearDropIndicators();
+    tItem.classList.toggle("drop-before", before);
+    tItem.classList.toggle("drop-after", !before);
+  });
+
+  tItem.addEventListener("dragleave", (e) => {
+    if (!tItem.contains(e.relatedTarget)) {
+      tItem.classList.remove("drop-before", "drop-after");
+    }
   });
 
   tItem.addEventListener("drop", async (e) => {
     e.preventDefault();
+    clearDropIndicators();
     const draggedId = e.dataTransfer.getData("text/plain");
     if (!draggedId || draggedId === action.id) return;
     const fromIndex = state.actions.findIndex((a) => a.id === draggedId);
     const toIndex = state.actions.findIndex((a) => a.id === action.id);
     if (fromIndex < 0 || toIndex < 0) return;
 
+    const insertAfter = tItem.classList.contains("drop-after");
     const [moved] = state.actions.splice(fromIndex, 1);
-    state.actions.splice(toIndex, 0, moved);
+    let insertIndex = insertAfter ? toIndex + 1 : toIndex;
+    if (fromIndex < insertIndex) insertIndex -= 1;
+    state.actions.splice(insertIndex, 0, moved);
+    clearDropIndicators();
     await saveState();
     render();
     showStatus("↕️ Action reordered");
