@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html data-theme="auto">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -99,6 +99,16 @@
               <label class="label">Delay between actions (sec)</label>
               <input id="globalDelayInput" class="input" type="number" step="0.1" min="0" />
               <div class="hint">Default: 0.2 sec</div>
+            </div>
+
+            <div class="formRow">
+              <label class="label" for="themeSelect">Theme</label>
+              <select id="themeSelect" class="select">
+                <option value="auto">Auto (match system)</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+              <div class="hint">Choose a high-contrast glass theme.</div>
             </div>
 
             <div class="formActions">

@@ -1,19 +1,52 @@
 :root {
-  --bg: #0f1115;
-  --panel: #141823;
-  --card: #191f2d;
-  --text: #e8ecf3;
-  --muted: #98a2b3;
-  --line: rgba(255, 255, 255, 0.08);
-  --accent: #7c5cff;
-  --danger: #ff4d4d;
-  --warning: #fbbf24;
-  --shadow: 0 10px 30px rgba(0,0,0,0.35);
+  color-scheme: light dark;
+  --bg: #f6f6f6;
+  --panel: rgba(255, 255, 255, 0.75);
+  --card: rgba(255, 255, 255, 0.68);
+  --text: #0b0b0b;
+  --muted: #4a4a4a;
+  --line: rgba(0, 0, 0, 0.16);
+  --accent: #111111;
+  --accent-rgb: 17, 17, 17;
+  --danger: #b00020;
+  --warning: #c97a00;
+  --shadow: 0 18px 40px rgba(0,0,0,0.12);
   --radius: 14px;
   --radius2: 18px;
   --pad: 14px;
+  --glass: blur(16px);
   --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji",
     "Segoe UI Emoji";
+}
+
+[data-theme="dark"] {
+  --bg: #070707;
+  --panel: rgba(16, 16, 16, 0.82);
+  --card: rgba(20, 20, 20, 0.75);
+  --text: #f7f7f7;
+  --muted: #b5b5b5;
+  --line: rgba(255, 255, 255, 0.18);
+  --accent: #ffffff;
+  --accent-rgb: 255, 255, 255;
+  --danger: #ff4d4d;
+  --warning: #f6b94c;
+  --shadow: 0 20px 45px rgba(0,0,0,0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] {
+    --bg: #070707;
+    --panel: rgba(16, 16, 16, 0.82);
+    --card: rgba(20, 20, 20, 0.75);
+    --text: #f7f7f7;
+    --muted: #b5b5b5;
+    --line: rgba(255, 255, 255, 0.18);
+    --accent: #ffffff;
+    --accent-rgb: 255, 255, 255;
+    --danger: #ff4d4d;
+    --warning: #f6b94c;
+    --shadow: 0 20px 45px rgba(0,0,0,0.5);
+  }
 }
 
 * { box-sizing: border-box; }
@@ -38,7 +71,8 @@ html, body {
   justify-content: space-between;
   padding: 12px var(--pad);
   border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(124,92,255,0.16), rgba(12,14,20,0.6));
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.06), rgba(var(--accent-rgb), 0.02));
+  backdrop-filter: var(--glass);
 }
 
 .brand {
@@ -51,7 +85,7 @@ html, body {
   width: 28px;
   height: 28px;
   border-radius: 10px;
-  background: rgba(124, 92, 255, 0.18);
+  background: rgba(var(--accent-rgb), 0.12);
   display: grid;
   place-items: center;
   font-weight: 800;
@@ -114,7 +148,7 @@ html, body {
   bottom: 0;
   width: 4px;
   border-radius: 999px;
-  background: rgba(124, 92, 255, 0.16);
+  background: rgba(var(--accent-rgb), 0.18);
 }
 
 .tDot {
@@ -123,8 +157,8 @@ html, body {
   width: 12px;
   height: 12px;
   border-radius: 999px;
-  background: rgba(232, 236, 243, 0.85);
-  border: 2px solid rgba(124, 92, 255, 0.55);
+  background: rgba(var(--accent-rgb), 0.9);
+  border: 2px solid rgba(var(--accent-rgb), 0.65);
   margin-top: 14px;
   z-index: 1;
   transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
@@ -132,14 +166,14 @@ html, body {
 
 /* Running step visuals */
 .tItem.running .tDot {
-  background: rgba(124, 92, 255, 0.95);
+  background: rgba(var(--accent-rgb), 0.95);
   transform: scale(1.15);
-  box-shadow: 0 0 0 6px rgba(124, 92, 255, 0.16);
+  box-shadow: 0 0 0 6px rgba(var(--accent-rgb), 0.16);
 }
 
 .tItem.done .tDot {
-  background: rgba(124, 92, 255, 0.55);
-  border-color: rgba(124, 92, 255, 0.35);
+  background: rgba(var(--accent-rgb), 0.45);
+  border-color: rgba(var(--accent-rgb), 0.35);
   box-shadow: none;
   animation: none;
 }
@@ -151,8 +185,8 @@ html, body {
 }
 
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 6px rgba(124, 92, 255, 0.10); }
-  50% { box-shadow: 0 0 0 10px rgba(124, 92, 255, 0.18); }
+  0%, 100% { box-shadow: 0 0 0 6px rgba(var(--accent-rgb), 0.1); }
+  50% { box-shadow: 0 0 0 10px rgba(var(--accent-rgb), 0.18); }
 }
 
 @keyframes pausePulse {
@@ -166,7 +200,7 @@ html, body {
   height: 40px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: rgba(255,255,255,0.03);
+  background: rgba(var(--accent-rgb), 0.04);
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -177,8 +211,8 @@ html, body {
   background: rgba(255, 77, 77, 0.12);
 }
 .iconBtn:hover {
-  background: rgba(124,92,255,0.12);
-  border-color: rgba(124,92,255,0.35);
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-rgb), 0.3);
   transform: translateY(-1px);
 }
 .iconBtn.danger:hover {
@@ -203,10 +237,11 @@ html, body {
   box-shadow: var(--shadow);
   overflow: hidden;
   transition: border 120ms ease, transform 120ms ease;
+  backdrop-filter: var(--glass);
 }
 
 .tItem.running .card {
-  border-color: rgba(124, 92, 255, 0.55);
+  border-color: rgba(var(--accent-rgb), 0.55);
   transform: translateY(-1px);
 }
 
@@ -247,7 +282,7 @@ html, body {
   cursor: grabbing;
 }
 .dragHandle:hover {
-  border-color: rgba(124, 92, 255, 0.35);
+  border-color: rgba(var(--accent-rgb), 0.35);
   color: var(--text);
 }
 .dragHandle .material-icons {
@@ -311,7 +346,7 @@ html, body {
 
 .btn {
   border: 1px solid var(--line);
-  background: rgba(255,255,255,0.03);
+  background: rgba(var(--accent-rgb), 0.04);
   color: var(--text);
   border-radius: 12px;
   padding: 10px 12px;
@@ -320,15 +355,15 @@ html, body {
   transition: background 120ms ease, border 120ms ease;
 }
 .btn:hover {
-  background: rgba(124,92,255,0.12);
-  border-color: rgba(124,92,255,0.35);
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-rgb), 0.35);
 }
 .btn.primary {
-  background: rgba(124,92,255,0.16);
-  border-color: rgba(124,92,255,0.35);
+  background: rgba(var(--accent-rgb), 0.16);
+  border-color: rgba(var(--accent-rgb), 0.45);
 }
 .btn.primary:hover {
-  background: rgba(124,92,255,0.22);
+  background: rgba(var(--accent-rgb), 0.24);
 }
 
 .btn.toggle {
@@ -338,8 +373,8 @@ html, body {
   font-weight: 700;
 }
 .btn.toggle.active {
-  border-color: rgba(124, 92, 255, 0.5);
-  background: rgba(124, 92, 255, 0.2);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.2);
 }
 
 .pill {
@@ -357,7 +392,7 @@ html, body {
 /* JSON toggle */
 .jsonToggle {
   border: 1px solid var(--line);
-  background: rgba(255,255,255,0.03);
+  background: rgba(var(--accent-rgb), 0.04);
   color: var(--muted);
   border-radius: 999px;
   padding: 8px 10px;
@@ -366,15 +401,15 @@ html, body {
 }
 .jsonToggle:hover {
   color: var(--text);
-  border-color: rgba(124,92,255,0.35);
-  background: rgba(124,92,255,0.10);
+  border-color: rgba(var(--accent-rgb), 0.35);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 .jsonBox {
   margin-top: 10px;
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 10px;
-  background: rgba(0,0,0,0.18);
+  background: rgba(var(--accent-rgb), 0.06);
   overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
@@ -402,6 +437,7 @@ html, body {
   border-radius: 20px;
   box-shadow: var(--shadow);
   overflow: hidden;
+  backdrop-filter: var(--glass);
 }
 
 .modalHeader {
@@ -424,14 +460,14 @@ html, body {
 .nodeItem {
   text-align: left;
   border: 1px solid var(--line);
-  background: rgba(255,255,255,0.03);
+  background: rgba(var(--accent-rgb), 0.04);
   border-radius: 16px;
   padding: 12px;
   cursor: pointer;
 }
 .nodeItem:hover {
-  border-color: rgba(124,92,255,0.35);
-  background: rgba(124,92,255,0.10);
+  border-color: rgba(var(--accent-rgb), 0.35);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .nodeName { font-weight: 900; margin-bottom: 4px; }
@@ -443,12 +479,13 @@ html, body {
   right: 12px;
   bottom: 12px;
   padding: 10px 12px;
-  background: rgba(20, 24, 35, 0.92);
+  background: rgba(var(--accent-rgb), 0.08);
   border: 1px solid var(--line);
   border-radius: 14px;
   box-shadow: var(--shadow);
   color: var(--text);
   font-size: 13px;
+  backdrop-filter: var(--glass);
 }
 
 /* Settings form */
@@ -465,7 +502,16 @@ html, body {
   height: 42px;
   border-radius: 14px;
   border: 1px solid var(--line);
-  background: rgba(255,255,255,0.03);
+  background: rgba(var(--accent-rgb), 0.04);
+  color: var(--text);
+  padding: 0 12px;
+  font-weight: 800;
+}
+.select {
+  height: 42px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(var(--accent-rgb), 0.04);
   color: var(--text);
   padding: 0 12px;
   font-weight: 800;

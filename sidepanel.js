@@ -15,6 +15,7 @@ const settingsBackdrop = document.getElementById("settingsBackdrop");
 const closeSettingsBtn = document.getElementById("closeSettingsBtn");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const globalDelayInput = document.getElementById("globalDelayInput");
+const themeSelect = document.getElementById("themeSelect");
 
 const actionsList = document.getElementById("actionsList");
 const statusEl = document.getElementById("status");
@@ -22,7 +23,8 @@ const statusEl = document.getElementById("status");
 // State
 let state = {
   settings: {
-    globalDelaySec: 0.2
+    globalDelaySec: 0.2,
+    themeMode: "auto"
   },
   actions: []
   // action:
@@ -53,6 +55,9 @@ async function loadState() {
   // Defaults (in case older saved state)
   state.settings ||= { globalDelaySec: 0.2 };
   if (typeof state.settings.globalDelaySec !== "number") state.settings.globalDelaySec = 0.2;
+  if (!["auto", "light", "dark"].includes(state.settings.themeMode)) {
+    state.settings.themeMode = "auto";
+  }
 
   for (const a of state.actions) {
     if (typeof a.collapsed !== "boolean") a.collapsed = true;
@@ -63,6 +68,7 @@ async function loadState() {
   }
 
   render();
+  applyTheme(state.settings.themeMode);
 }
 
 async function saveState() {
@@ -78,6 +84,7 @@ function closeModal() {
 
 function openSettings() {
   globalDelayInput.value = String(state.settings.globalDelaySec ?? 0.2);
+  themeSelect.value = state.settings.themeMode ?? "auto";
   settingsBackdrop.classList.remove("hidden");
 }
 function closeSettings() {
@@ -99,6 +106,8 @@ settingsBackdrop.addEventListener("click", (e) => {
 saveSettingsBtn.addEventListener("click", async () => {
   const v = Number(globalDelayInput.value);
   state.settings.globalDelaySec = Number.isFinite(v) && v >= 0 ? v : 0.2;
+  state.settings.themeMode = themeSelect.value ?? "auto";
+  applyTheme(state.settings.themeMode);
   await saveState();
   closeSettings();
   showStatus("✅ Settings saved");
@@ -639,6 +648,10 @@ function setPlayButtonState() {
   icon.textContent = "play_arrow";
   playBtn.title = runState.status === "paused" ? "Resume" : "Play";
   playBtn.setAttribute("aria-label", runState.status === "paused" ? "Resume" : "Play");
+}
+
+function applyTheme(mode) {
+  document.documentElement.setAttribute("data-theme", mode);
 }
 
 // Boot
