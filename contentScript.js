@@ -314,8 +314,20 @@
 
   async function scrollTargetIntoView(target) {
     if (!(target instanceof Element)) return Promise.resolve(false);
-    target.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
-    await waitForScrollToSettle();
+    const scrollingElement = document.scrollingElement || document.documentElement;
+    const rect = target.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || scrollingElement?.clientHeight || 0;
+    const viewportWidth = window.innerWidth || scrollingElement?.clientWidth || 0;
+    const centerOffsetY = rect.top + rect.height / 2 - viewportHeight / 2;
+    const centerOffsetX = rect.left + rect.width / 2 - viewportWidth / 2;
+    if (scrollingElement) {
+      const nextTop = scrollingElement.scrollTop + centerOffsetY;
+      const nextLeft = scrollingElement.scrollLeft + centerOffsetX;
+      scrollingElement.scrollTop = Math.max(0, nextTop);
+      scrollingElement.scrollLeft = Math.max(0, nextLeft);
+    }
+    target.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
+    await waitForScrollToSettle(1600, 100);
     return true;
   }
 
