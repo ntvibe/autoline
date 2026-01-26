@@ -3,13 +3,12 @@
   const PREVIEW_ID = "autoline-click-preview";
   const STYLE_ID = "autoline-overlay-style";
   const RECORDING_CLASS = "autoline-recording";
-  const CLICK_DELAY_MS = 80;
-
   let pendingRecord = null;
   let pointerState = {
     visible: false,
     x: 0,
     y: 0,
+    padding: 0,
     animation: null
   };
 
@@ -371,14 +370,20 @@
     const shadowEnabled = settings?.pointerShadowEnabled !== false;
     const shadowOpacity = Math.max(0, Math.min(1, Number(settings?.pointerShadowOpacity ?? 0.25)));
     const shadowBlur = Math.max(0, Number(settings?.pointerShadowBlur ?? 8));
+    const padding = Math.max(2, Math.ceil(strokeWidth / 2) + 1);
 
     pointer.style.width = `${size}px`;
     pointer.style.height = `${size}px`;
+    pointer.style.padding = `${padding}px`;
+    pointer.style.boxSizing = "content-box";
+    pointerState.padding = padding;
 
     const svg = pointer.querySelector("svg");
     if (svg) {
+      svg.style.display = "block";
       svg.setAttribute("width", "100%");
       svg.setAttribute("height", "100%");
+      svg.setAttribute("overflow", "visible");
       const path = svg.querySelector("path");
       if (path) {
         path.setAttribute("fill", fill);
@@ -396,7 +401,8 @@
   }
 
   function setPointerPosition(pointer, x, y) {
-    pointer.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+    const offset = pointerState.padding || 0;
+    pointer.style.transform = `translate(${Math.round(x - offset)}px, ${Math.round(y - offset)}px)`;
     pointerState.x = x;
     pointerState.y = y;
   }
@@ -458,17 +464,18 @@
       cancelable: true,
       clientX: x,
       clientY: y,
-      view: window
+      view: window,
+      detail: safeCount
     };
-    for (let i = 1; i <= safeCount; i += 1) {
-      const eventInit = { ...baseEventInit, detail: i };
-      target.dispatchEvent(new MouseEvent("mousemove", eventInit));
-      target.dispatchEvent(new MouseEvent("mousedown", eventInit));
-      target.dispatchEvent(new MouseEvent("mouseup", eventInit));
-      target.dispatchEvent(new MouseEvent("click", eventInit));
-      if (i === 2) {
-        target.dispatchEvent(new MouseEvent("dblclick", eventInit));
-      }
+    const mousedown = new MouseEvent("mousedown", baseEventInit);
+    const mouseup = new MouseEvent("mouseup", baseEventInit);
+    const click = new MouseEvent("click", baseEventInit);
+    target.dispatchEvent(new MouseEvent("mousemove", baseEventInit));
+    target.dispatchEvent(mousedown);
+    target.dispatchEvent(mouseup);
+    target.dispatchEvent(click);
+    if (safeCount === 2) {
+      target.dispatchEvent(new MouseEvent("dblclick", baseEventInit));
     }
   }
 
@@ -585,19 +592,14 @@
         const x = ensured.resolved.click.x;
         const y = ensured.resolved.click.y;
         const clickCount = Math.min(3, Math.max(1, Number(msg.action?.clickCount) || 1));
-        for (let i = 0; i < clickCount; i += 1) {
-          if (msg.showDot !== false) {
-            showClickIndicator(x, y);
-          }
-          const target = document.elementFromPoint(x, y) || ensured.resolved.target;
-          try {
-            target.focus?.({ preventScroll: true });
-          } catch (e) {}
-          dispatchClick(target, x, y, 1);
-          if (i < clickCount - 1) {
-            await new Promise((resolve) => window.setTimeout(resolve, CLICK_DELAY_MS));
-          }
+        if (msg.showDot !== false) {
+          showClickIndicator(x, y);
         }
+        const target = document.elementFromPoint(x, y) || ensured.resolved.target;
+        try {
+          target.focus?.({ preventScroll: true });
+        } catch (e) {}
+        dispatchClick(target, x, y, clickCount);
         sendResponse({ ok: true, x, y });
       })();
       return true;
