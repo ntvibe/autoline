@@ -310,7 +310,7 @@ function renderTimelineItem(action, idx, isLast) {
   const dragHandle = document.createElement("div");
   dragHandle.className = "dragHandle";
   dragHandle.setAttribute("aria-label", "Drag to reorder");
-  dragHandle.innerHTML = `<span class="material-icons" aria-hidden="true">drag_indicator</span>`;
+  dragHandle.innerHTML = `<span class="material-icons" aria-hidden="true">more_vert</span>`;
   dragHandle.draggable = true;
   dragHandle.addEventListener("click", (e) => e.stopPropagation());
 
