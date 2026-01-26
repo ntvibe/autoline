@@ -122,12 +122,24 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  position: relative;
+}
+
+.actionsList::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 12px;
+  width: 4px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.18);
 }
 
 /* --- timeline wrapper per item --- */
 .tItem {
   display: grid;
-  grid-template-columns: 22px 1fr;
+  grid-template-columns: 24px 1fr;
   gap: 10px;
   align-items: stretch;
 }
@@ -139,27 +151,20 @@ html, body {
 .tRail {
   position: relative;
   display: flex;
+  align-items: center;
   justify-content: center;
 }
 
 .tLine {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  border-radius: 999px;
-  background: rgba(var(--accent-rgb), 0.18);
+  display: none;
 }
 
 .tDot {
-  position: sticky;
-  top: 14px;
   width: 12px;
   height: 12px;
   border-radius: 999px;
   background: rgba(var(--accent-rgb), 0.9);
   border: 2px solid rgba(var(--accent-rgb), 0.65);
-  margin-top: 14px;
   z-index: 1;
   transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
@@ -266,7 +271,7 @@ html, body {
   transition: transform 160ms ease;
 }
 .caret .material-icons { font-size: 18px; }
-.card.collapsed .caret { transform: rotate(-90deg); }
+.card:not(.collapsed) .caret { transform: rotate(90deg); }
 
 .dragHandle {
   width: 22px;
