@@ -638,6 +638,7 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 function setPlayButtonState() {
   const icon = playBtn.querySelector(".material-icons");
+  playBtn.classList.toggle("paused", runState.status === "paused");
   if (runState.status === "running") {
     icon.textContent = "pause";
     playBtn.title = "Pause";
