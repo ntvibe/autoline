@@ -3,7 +3,7 @@
   "name": "Autoline",
   "version": "0.1.2",
   "description": "Side-panel automation nodes",
-  "permissions": ["tabs", "storage", "sidePanel"],
+  "permissions": ["tabs", "storage", "sidePanel", "scripting"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js",
@@ -14,5 +14,12 @@
   },
   "side_panel": {
     "default_path": "sidepanel.html"
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["contentScript.js"],
+      "run_at": "document_idle"
+    }
+  ]
 }
