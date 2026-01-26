@@ -3,6 +3,7 @@
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chunkDelay = 150;
 const urlSchemeRegex = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
+const attachedDebugTabs = new Set();
 
 // Open side panel on icon click
 chrome.runtime.onInstalled.addListener(async () => {
@@ -179,6 +180,7 @@ async function runFlow(actions, settings, runId) {
         const clickX = ensured?.click?.x ?? resolved.click.x;
         const clickY = ensured?.click?.y ?? resolved.click.y;
         const viewport = ensured?.viewport ?? resolved.viewport;
+        const clickCount = Math.min(3, Math.max(1, Number(step?.clickCount) || 1));
 
         if (!pointerVisible) {
           const centerX = (viewport?.width ?? 0) / 2 || clickX;
@@ -217,11 +219,15 @@ async function runFlow(actions, settings, runId) {
           });
         }
 
-        await sendMessageToTab(tab.id, {
-          type: "PERFORM_CLICK",
-          action: step,
-          showDot: step.showClickDot !== false
-        });
+        if (step.showClickDot !== false) {
+          await sendMessageToTab(tab.id, {
+            type: "SHOW_CLICK_DOT",
+            x: clickX,
+            y: clickY,
+            showDot: true
+          });
+        }
+        await realClick(tab.id, clickX, clickY, clickCount);
 
         const hasMoreClicks = actions.slice(i + 1).some((action) => action.type === "click");
         if (!hasMoreClicks) {
@@ -331,4 +337,75 @@ function normalizeUrl(rawUrl) {
   if (!trimmed) return "";
   if (urlSchemeRegex.test(trimmed)) return trimmed;
   return `https://${trimmed}`;
+}
+
+function dispatchMouse(tabId, params) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", params, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function ensureDebuggerAttached(tabId) {
+  if (attachedDebugTabs.has(tabId)) {
+    return false;
+  }
+  return new Promise((resolve, reject) => {
+    chrome.debugger.attach({ tabId }, "1.3", () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      attachedDebugTabs.add(tabId);
+      resolve(true);
+    });
+  });
+}
+
+async function detachDebugger(tabId) {
+  if (!attachedDebugTabs.has(tabId)) {
+    return;
+  }
+  await new Promise((resolve) => {
+    chrome.debugger.detach({ tabId }, () => resolve());
+  });
+  attachedDebugTabs.delete(tabId);
+}
+
+async function realClick(tabId, x, y, count = 1) {
+  const safeCount = Math.min(3, Math.max(1, Number(count) || 1));
+  const attachedNow = await ensureDebuggerAttached(tabId);
+  try {
+    await dispatchMouse(tabId, { type: "mouseMoved", x, y, buttons: 0 });
+    for (let index = 1; index <= safeCount; index += 1) {
+      await dispatchMouse(tabId, {
+        type: "mousePressed",
+        x,
+        y,
+        button: "left",
+        buttons: 1,
+        clickCount: index
+      });
+      await dispatchMouse(tabId, {
+        type: "mouseReleased",
+        x,
+        y,
+        button: "left",
+        buttons: 1,
+        clickCount: index
+      });
+      if (index < safeCount) {
+        await sleep(80);
+      }
+    }
+  } finally {
+    if (attachedNow) {
+      await detachDebugger(tabId);
+    }
+  }
 }
