@@ -289,6 +289,25 @@
     });
   }
 
+  function waitForClickPosition(action, timeoutMs = 800) {
+    return new Promise((resolve) => {
+      const start = performance.now();
+      const check = () => {
+        const resolved = resolveClickPosition(action);
+        if (resolved && isPointInViewport(resolved.click.x, resolved.click.y)) {
+          resolve(resolved);
+          return;
+        }
+        if (performance.now() - start > timeoutMs) {
+          resolve(resolved ?? null);
+          return;
+        }
+        requestAnimationFrame(check);
+      };
+      requestAnimationFrame(check);
+    });
+  }
+
   async function ensureClickVisible(action) {
     const resolved = resolveClickPosition(action);
     if (!resolved) return null;
@@ -296,7 +315,7 @@
       return { resolved, scrolled: false };
     }
     await scrollTargetIntoView(resolved.target);
-    const updated = resolveClickPosition(action);
+    const updated = await waitForClickPosition(action);
     return { resolved: updated ?? resolved, scrolled: true };
   }
 
@@ -305,13 +324,13 @@
     if (existing) existing.remove();
   }
 
-  function showPreview(action) {
+  async function showPreview(action) {
     ensureStyles();
     removePreview();
 
-    const resolved = resolveClickPosition(action);
-    if (!resolved) return;
-    const { rect, click } = resolved;
+    const ensured = await ensureClickVisible(action);
+    if (!ensured?.resolved) return;
+    const { rect, click } = ensured.resolved;
 
     const overlay = document.createElement("div");
     overlay.id = PREVIEW_ID;
@@ -431,10 +450,13 @@
 
     const start = { x: pointerState.x, y: pointerState.y };
     const end = { x, y };
+    const offset = pointerState.padding || 0;
     pointerState.animation = pointer.animate(
       [
-        { transform: `translate(${Math.round(start.x)}px, ${Math.round(start.y)}px)` },
-        { transform: `translate(${Math.round(end.x)}px, ${Math.round(end.y)}px)` }
+        {
+          transform: `translate(${Math.round(start.x - offset)}px, ${Math.round(start.y - offset)}px)`
+        },
+        { transform: `translate(${Math.round(end.x - offset)}px, ${Math.round(end.y - offset)}px)` }
       ],
       {
         duration: Math.max(0, duration),
@@ -459,23 +481,22 @@
 
   function dispatchClick(target, x, y, count = 1) {
     const safeCount = Math.min(3, Math.max(1, Number(count) || 1));
-    const baseEventInit = {
-      bubbles: true,
-      cancelable: true,
-      clientX: x,
-      clientY: y,
-      view: window,
-      detail: safeCount
-    };
-    const mousedown = new MouseEvent("mousedown", baseEventInit);
-    const mouseup = new MouseEvent("mouseup", baseEventInit);
-    const click = new MouseEvent("click", baseEventInit);
-    target.dispatchEvent(new MouseEvent("mousemove", baseEventInit));
-    target.dispatchEvent(mousedown);
-    target.dispatchEvent(mouseup);
-    target.dispatchEvent(click);
-    if (safeCount === 2) {
-      target.dispatchEvent(new MouseEvent("dblclick", baseEventInit));
+    for (let index = 1; index <= safeCount; index += 1) {
+      const baseEventInit = {
+        bubbles: true,
+        cancelable: true,
+        clientX: x,
+        clientY: y,
+        view: window,
+        detail: index
+      };
+      target.dispatchEvent(new MouseEvent("mousemove", baseEventInit));
+      target.dispatchEvent(new MouseEvent("mousedown", baseEventInit));
+      target.dispatchEvent(new MouseEvent("mouseup", baseEventInit));
+      target.dispatchEvent(new MouseEvent("click", baseEventInit));
+      if (index === 2) {
+        target.dispatchEvent(new MouseEvent("dblclick", baseEventInit));
+      }
     }
   }
 
