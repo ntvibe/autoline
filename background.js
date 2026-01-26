@@ -175,12 +175,14 @@ async function runFlow(actions, settings, runId) {
         if (!tab) throw new Error("No active tab to click.");
         const resolved = await resolveClickTarget(tab.id, step);
         if (!resolved?.ok) throw new Error("Click target not found on the page.");
-        const clickX = resolved.click.x;
-        const clickY = resolved.click.y;
+        const ensured = await ensureClickVisible(tab.id, step);
+        const clickX = ensured?.click?.x ?? resolved.click.x;
+        const clickY = ensured?.click?.y ?? resolved.click.y;
+        const viewport = ensured?.viewport ?? resolved.viewport;
 
         if (!pointerVisible) {
-          const centerX = (resolved.viewport?.width ?? 0) / 2 || clickX;
-          const centerY = (resolved.viewport?.height ?? 0) / 2 || clickY;
+          const centerX = (viewport?.width ?? 0) / 2 || clickX;
+          const centerY = (viewport?.height ?? 0) / 2 || clickY;
           await sendMessageToTab(tab.id, {
             type: "POINTER_SHOW",
             x: centerX,
@@ -246,8 +248,8 @@ async function runFlow(actions, settings, runId) {
         if (step.type === "click" && nextStep?.type === "click") {
           const tab = await getActiveTab();
           if (tab) {
-            const nextResolved = await resolveClickTarget(tab.id, nextStep);
-            if (nextResolved?.ok) {
+            const nextResolved = await ensureClickVisible(tab.id, nextStep);
+            if (nextResolved) {
               await sendMessageToTab(tab.id, {
                 type: "POINTER_MOVE",
                 x: nextResolved.click.x,
@@ -308,6 +310,12 @@ function sendMessageToTab(tabId, message) {
 
 async function resolveClickTarget(tabId, action) {
   const response = await sendMessageToTab(tabId, { type: "RESOLVE_CLICK_TARGET", action });
+  if (!response?.ok) return null;
+  return response;
+}
+
+async function ensureClickVisible(tabId, action) {
+  const response = await sendMessageToTab(tabId, { type: "ENSURE_CLICK_VISIBLE", action });
   if (!response?.ok) return null;
   return response;
 }

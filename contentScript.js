@@ -3,6 +3,7 @@
   const PREVIEW_ID = "autoline-click-preview";
   const STYLE_ID = "autoline-overlay-style";
   const RECORDING_CLASS = "autoline-recording";
+  const CLICK_DELAY_MS = 80;
 
   let pendingRecord = null;
   let pointerState = {
@@ -272,6 +273,34 @@
     };
   }
 
+  function isPointInViewport(x, y, padding = 6) {
+    return (
+      x >= padding &&
+      y >= padding &&
+      x <= window.innerWidth - padding &&
+      y <= window.innerHeight - padding
+    );
+  }
+
+  function scrollTargetIntoView(target) {
+    if (!(target instanceof Element)) return Promise.resolve(false);
+    target.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+    return new Promise((resolve) => {
+      window.setTimeout(() => resolve(true), 350);
+    });
+  }
+
+  async function ensureClickVisible(action) {
+    const resolved = resolveClickPosition(action);
+    if (!resolved) return null;
+    if (isPointInViewport(resolved.click.x, resolved.click.y)) {
+      return { resolved, scrolled: false };
+    }
+    await scrollTargetIntoView(resolved.target);
+    const updated = resolveClickPosition(action);
+    return { resolved: updated ?? resolved, scrolled: true };
+  }
+
   function removePreview() {
     const existing = document.getElementById(PREVIEW_ID);
     if (existing) existing.remove();
@@ -325,8 +354,8 @@
       pointer = document.createElement("div");
       pointer.id = POINTER_ID;
       pointer.innerHTML = `
-        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M0 0 L0 20 L6 14 L9 24 L12 23 L9 13 L18 13 Z" />
+        <svg viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="m 84.129429,138.16588 -6.033788,-16.09011 a 1.0349787,1.0349787 134.82411 0 1 1.326529,-1.3347 l 16.080445,5.91781 a 0.71192652,0.71192652 92.708471 0 1 -0.06417,1.35647 l -5.792329,1.52902 a 3.8207454,3.8207454 134.62447 0 0 -2.731492,2.76754 l -1.444402,5.7776 a 0.70328462,0.70328462 176.74011 0 1 -1.340793,0.0764 z" />
         </svg>
       `;
       document.body.appendChild(pointer);
@@ -419,18 +448,25 @@
     pointerState.visible = false;
   }
 
-  function dispatchClick(target, x, y) {
-    const eventInit = {
+  function dispatchClick(target, x, y, count = 1) {
+    const safeCount = Math.min(3, Math.max(1, Number(count) || 1));
+    const baseEventInit = {
       bubbles: true,
       cancelable: true,
       clientX: x,
       clientY: y,
       view: window
     };
-    target.dispatchEvent(new MouseEvent("mousemove", eventInit));
-    target.dispatchEvent(new MouseEvent("mousedown", eventInit));
-    target.dispatchEvent(new MouseEvent("mouseup", eventInit));
-    target.dispatchEvent(new MouseEvent("click", eventInit));
+    for (let i = 1; i <= safeCount; i += 1) {
+      const eventInit = { ...baseEventInit, detail: i };
+      target.dispatchEvent(new MouseEvent("mousemove", eventInit));
+      target.dispatchEvent(new MouseEvent("mousedown", eventInit));
+      target.dispatchEvent(new MouseEvent("mouseup", eventInit));
+      target.dispatchEvent(new MouseEvent("click", eventInit));
+      if (i === 2) {
+        target.dispatchEvent(new MouseEvent("dblclick", eventInit));
+      }
+    }
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -481,6 +517,32 @@
       return true;
     }
 
+    if (msg?.type === "ENSURE_CLICK_VISIBLE") {
+      (async () => {
+        const ensured = await ensureClickVisible(msg.action);
+        if (!ensured?.resolved) {
+          sendResponse({ ok: false });
+          return;
+        }
+        const { rect, click } = ensured.resolved;
+        sendResponse({
+          ok: true,
+          rect: {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height
+          },
+          click: { x: click.x, y: click.y },
+          viewport: {
+            width: window.innerWidth,
+            height: window.innerHeight
+          }
+        });
+      })();
+      return true;
+    }
+
     if (msg?.type === "POINTER_SHOW") {
       showPointer(msg.x, msg.y, msg.settings, msg.fadeIn !== false);
       sendResponse({ ok: true });
@@ -511,22 +573,30 @@
     }
 
     if (msg?.type === "PERFORM_CLICK") {
-      const resolved = resolveClickPosition(msg.action);
-      if (!resolved) {
-        sendResponse({ ok: false });
-        return true;
-      }
-      const x = resolved.click.x;
-      const y = resolved.click.y;
-      if (msg.showDot !== false) {
-        showClickIndicator(x, y);
-      }
-      const target = document.elementFromPoint(x, y) || resolved.target;
-      try {
-        target.focus?.({ preventScroll: true });
-      } catch (e) {}
-      dispatchClick(target, x, y);
-      sendResponse({ ok: true, x, y });
+      (async () => {
+        const ensured = await ensureClickVisible(msg.action);
+        if (!ensured?.resolved) {
+          sendResponse({ ok: false });
+          return;
+        }
+        const x = ensured.resolved.click.x;
+        const y = ensured.resolved.click.y;
+        const clickCount = Math.min(3, Math.max(1, Number(msg.action?.clickCount) || 1));
+        for (let i = 0; i < clickCount; i += 1) {
+          if (msg.showDot !== false) {
+            showClickIndicator(x, y);
+          }
+          const target = document.elementFromPoint(x, y) || ensured.resolved.target;
+          try {
+            target.focus?.({ preventScroll: true });
+          } catch (e) {}
+          dispatchClick(target, x, y, 1);
+          if (i < clickCount - 1) {
+            await new Promise((resolve) => window.setTimeout(resolve, CLICK_DELAY_MS));
+          }
+        }
+        sendResponse({ ok: true, x, y });
+      })();
       return true;
     }
 
