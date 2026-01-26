@@ -418,7 +418,9 @@ function renderTimelineItem(action, idx, isLast) {
     sub.textContent = action.url ? `• ${truncate(action.url, 32)}` : "• not set";
   }
   if (action.type === "click") {
-    sub.textContent = action.target ? `• ${truncate(action.target.label || \"target\", 32)}` : \"• not set\";
+    sub.textContent = action.target
+      ? `• ${truncate(action.target.label || "target", 32)}`
+      : "• not set";
   }
   if (action.type === "reloadTab") {
     sub.textContent = "• active tab";
