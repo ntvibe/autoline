@@ -99,6 +99,7 @@ async function loadState() {
     if (a.type === "click") {
       if (!a.target) a.target = null;
       if (!a.click) a.click = null;
+      if (!Number.isFinite(a.clickCount)) a.clickCount = 1;
       if (typeof a.showClickDot !== "boolean") a.showClickDot = true;
     }
     if (a.type === "simpleLoop" && typeof a.enabled !== "boolean") a.enabled = true;
@@ -258,6 +259,7 @@ addClickNode.addEventListener("click", async () => {
     jsonOpen: false,
     target: null,
     click: null,
+    clickCount: 1,
     showClickDot: true
   };
   state.actions.push(action);
@@ -388,6 +390,7 @@ function buildJsonForAction(action) {
       type: "click",
       target: action.target ?? null,
       click: action.click ?? null,
+      clickCount: Number.isFinite(action.clickCount) ? action.clickCount : 1,
       showClickDot: action.showClickDot !== false
     };
   }
@@ -663,6 +666,26 @@ function renderTimelineItem(action, idx, isLast) {
       ? `Recorded: ${truncate(action.target.label || action.target.selectors?.[0] || "target", 36)}`
       : "No click recorded";
 
+    const clickTypeLabel = document.createElement("div");
+    clickTypeLabel.className = "pill";
+    clickTypeLabel.textContent = "Click type";
+
+    const clickTypeSelect = document.createElement("select");
+    clickTypeSelect.className = "select";
+    clickTypeSelect.style.minWidth = "140px";
+    clickTypeSelect.innerHTML = `
+      <option value="1">Single click</option>
+      <option value="2">Double click</option>
+      <option value="3">Triple click</option>
+    `;
+    clickTypeSelect.value = String(Number.isFinite(action.clickCount) ? action.clickCount : 1);
+    clickTypeSelect.addEventListener("change", async () => {
+      const count = Number(clickTypeSelect.value);
+      action.clickCount = Number.isFinite(count) ? Math.min(3, Math.max(1, count)) : 1;
+      await saveState();
+      render();
+    });
+
     const dotLabel = document.createElement("div");
     dotLabel.className = "pill";
     dotLabel.textContent = "Click dot on playback";
@@ -681,6 +704,8 @@ function renderTimelineItem(action, idx, isLast) {
     left.appendChild(showBtn);
     left.appendChild(resetBtn);
     left.appendChild(pill);
+    left.appendChild(clickTypeLabel);
+    left.appendChild(clickTypeSelect);
     left.appendChild(dotLabel);
     left.appendChild(dotToggle);
   }
