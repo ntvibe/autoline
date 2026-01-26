@@ -56,6 +56,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       };
       runFlow(msg.actions || [], msg.settings || {}, runId).catch((e) => {
         chrome.runtime.sendMessage({ type: "FLOW_ERROR", error: String(e?.message || e) });
+        getActiveTab().then((tab) => {
+          if (tab) sendMessageToTab(tab.id, { type: "POINTER_HIDE" });
+        });
       });
       sendResponse({ ok: true });
       return;
@@ -80,6 +83,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       runController.paused = false;
       runController.running = false;
       chrome.runtime.sendMessage({ type: "FLOW_STOP" });
+      const active = await getActiveTab();
+      if (active) await sendMessageToTab(active.id, { type: "POINTER_HIDE" });
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (msg?.type === "CLICK_RECORDED") {
+      chrome.runtime.sendMessage(msg);
       sendResponse({ ok: true });
       return;
     }
@@ -118,8 +129,9 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 
 async function runFlow(actions, settings, runId) {
   // Normalize
-  const globalDelayMs = Math.max(0, Number(settings.globalDelaySec ?? 0.2)) * 1000;
+  const globalDelayMs = Math.max(0, Number(settings.globalDelaySec ?? 1)) * 1000;
   const loopEnabled = actions.some((action) => action.type === "simpleLoop" && action.enabled !== false);
+  let pointerVisible = false;
 
   let shouldLoop = true;
   while (shouldLoop) {
@@ -158,6 +170,33 @@ async function runFlow(actions, settings, runId) {
         await chrome.tabs.update(tab.id, { url });
       }
 
+      if (step.type === "click") {
+        const tab = await getActiveTab();
+        if (!tab) throw new Error("No active tab to click.");
+        const resolved = await resolveClickTarget(tab.id, step);
+        if (!resolved?.ok) throw new Error("Click target not found on the page.");
+
+        if (!pointerVisible) {
+          await sendMessageToTab(tab.id, {
+            type: "POINTER_SHOW",
+            x: resolved.click.x,
+            y: resolved.click.y,
+            settings,
+            fadeIn: true
+          });
+          pointerVisible = true;
+        } else {
+          await sendMessageToTab(tab.id, {
+            type: "POINTER_SNAP",
+            x: resolved.click.x,
+            y: resolved.click.y,
+            settings
+          });
+        }
+
+        await sendMessageToTab(tab.id, { type: "PERFORM_CLICK", action: step });
+      }
+
       if (step.type === "reloadTab") {
         const tab = await getActiveTab();
         if (!tab) throw new Error("No active tab to reload.");
@@ -172,6 +211,22 @@ async function runFlow(actions, settings, runId) {
 
       // Global delay between steps (don’t add extra after last)
       if (i !== actions.length - 1 && globalDelayMs > 0) {
+        const nextStep = actions[i + 1];
+        if (step.type === "click" && nextStep?.type === "click") {
+          const tab = await getActiveTab();
+          if (tab) {
+            const nextResolved = await resolveClickTarget(tab.id, nextStep);
+            if (nextResolved?.ok) {
+              await sendMessageToTab(tab.id, {
+                type: "POINTER_MOVE",
+                x: nextResolved.click.x,
+                y: nextResolved.click.y,
+                duration: globalDelayMs,
+                settings
+              });
+            }
+          }
+        }
         await sleepWithPause(globalDelayMs, runId);
       }
     }
@@ -183,6 +238,8 @@ async function runFlow(actions, settings, runId) {
 
   if (!isActiveRun(runId)) return;
   chrome.runtime.sendMessage({ type: "FLOW_END" });
+  const active = await getActiveTab();
+  if (active) await sendMessageToTab(active.id, { type: "POINTER_HIDE" });
   runController.running = false;
 }
 
@@ -204,6 +261,24 @@ async function sleepWithPause(ms, runId) {
     await sleep(slice);
     remaining -= slice;
   }
+}
+
+function sendMessageToTab(tabId, message) {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve(null);
+        return;
+      }
+      resolve(response);
+    });
+  });
+}
+
+async function resolveClickTarget(tabId, action) {
+  const response = await sendMessageToTab(tabId, { type: "RESOLVE_CLICK_TARGET", action });
+  if (!response?.ok) return null;
+  return response;
 }
 
 async function getActiveTab() {

@@ -8,6 +8,7 @@ const closeModalBtn = document.getElementById("closeModalBtn");
 const addSwitchTabNode = document.getElementById("addSwitchTabNode");
 const addDelayNode = document.getElementById("addDelayNode");
 const addOpenUrlNode = document.getElementById("addOpenUrlNode");
+const addClickNode = document.getElementById("addClickNode");
 const addReloadTabNode = document.getElementById("addReloadTabNode");
 const addSimpleLoopNode = document.getElementById("addSimpleLoopNode");
 
@@ -16,6 +17,13 @@ const closeSettingsBtn = document.getElementById("closeSettingsBtn");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const globalDelayInput = document.getElementById("globalDelayInput");
 const themeSelect = document.getElementById("themeSelect");
+const pointerSizeInput = document.getElementById("pointerSizeInput");
+const pointerFillInput = document.getElementById("pointerFillInput");
+const pointerOutlineInput = document.getElementById("pointerOutlineInput");
+const pointerOutlineColorInput = document.getElementById("pointerOutlineColorInput");
+const pointerShadowToggle = document.getElementById("pointerShadowToggle");
+const pointerShadowOpacityInput = document.getElementById("pointerShadowOpacityInput");
+const pointerShadowBlurInput = document.getElementById("pointerShadowBlurInput");
 
 const actionsList = document.getElementById("actionsList");
 const statusEl = document.getElementById("status");
@@ -23,12 +31,19 @@ const statusEl = document.getElementById("status");
 // State
 let state = {
   settings: {
-    globalDelaySec: 0.2,
-    themeMode: "auto"
+    globalDelaySec: 1,
+    themeMode: "auto",
+    pointerSizePx: 32,
+    pointerFill: "#000000",
+    pointerOutlinePx: 2,
+    pointerOutlineColor: "#ffffff",
+    pointerShadowEnabled: true,
+    pointerShadowOpacity: 0.25,
+    pointerShadowBlur: 8
   },
   actions: []
   // action:
-  // { id, type: "switchTab"|"delay"|"openUrl"|"reloadTab"|"simpleLoop", collapsed: true, jsonOpen: false }
+  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop", collapsed: true, jsonOpen: false }
 };
 
 let runState = {
@@ -53,10 +68,25 @@ async function loadState() {
   if (res.autolineState) state = res.autolineState;
 
   // Defaults (in case older saved state)
-  state.settings ||= { globalDelaySec: 0.2 };
-  if (typeof state.settings.globalDelaySec !== "number") state.settings.globalDelaySec = 0.2;
+  state.settings ||= { globalDelaySec: 1 };
+  if (typeof state.settings.globalDelaySec !== "number") state.settings.globalDelaySec = 1;
   if (!["auto", "light", "dark"].includes(state.settings.themeMode)) {
     state.settings.themeMode = "auto";
+  }
+  if (typeof state.settings.pointerSizePx !== "number") state.settings.pointerSizePx = 32;
+  if (typeof state.settings.pointerFill !== "string") state.settings.pointerFill = "#000000";
+  if (typeof state.settings.pointerOutlinePx !== "number") state.settings.pointerOutlinePx = 2;
+  if (typeof state.settings.pointerOutlineColor !== "string") {
+    state.settings.pointerOutlineColor = "#ffffff";
+  }
+  if (typeof state.settings.pointerShadowEnabled !== "boolean") {
+    state.settings.pointerShadowEnabled = true;
+  }
+  if (typeof state.settings.pointerShadowOpacity !== "number") {
+    state.settings.pointerShadowOpacity = 0.25;
+  }
+  if (typeof state.settings.pointerShadowBlur !== "number") {
+    state.settings.pointerShadowBlur = 8;
   }
 
   for (const a of state.actions) {
@@ -64,6 +94,10 @@ async function loadState() {
     if (typeof a.jsonOpen !== "boolean") a.jsonOpen = false;
     if (a.type === "delay" && typeof a.delaySec !== "number") a.delaySec = 1;
     if (a.type === "openUrl" && typeof a.url !== "string") a.url = "";
+    if (a.type === "click") {
+      if (!a.target) a.target = null;
+      if (!a.click) a.click = null;
+    }
     if (a.type === "simpleLoop" && typeof a.enabled !== "boolean") a.enabled = true;
   }
 
@@ -83,8 +117,15 @@ function closeModal() {
 }
 
 function openSettings() {
-  globalDelayInput.value = String(state.settings.globalDelaySec ?? 0.2);
+  globalDelayInput.value = String(state.settings.globalDelaySec ?? 1);
   themeSelect.value = state.settings.themeMode ?? "auto";
+  pointerSizeInput.value = String(state.settings.pointerSizePx ?? 32);
+  pointerFillInput.value = state.settings.pointerFill ?? "#000000";
+  pointerOutlineInput.value = String(state.settings.pointerOutlinePx ?? 2);
+  pointerOutlineColorInput.value = state.settings.pointerOutlineColor ?? "#ffffff";
+  pointerShadowToggle.checked = state.settings.pointerShadowEnabled !== false;
+  pointerShadowOpacityInput.value = String(Math.round((state.settings.pointerShadowOpacity ?? 0.25) * 100));
+  pointerShadowBlurInput.value = String(state.settings.pointerShadowBlur ?? 8);
   settingsBackdrop.classList.remove("hidden");
 }
 function closeSettings() {
@@ -105,8 +146,21 @@ settingsBackdrop.addEventListener("click", (e) => {
 
 saveSettingsBtn.addEventListener("click", async () => {
   const v = Number(globalDelayInput.value);
-  state.settings.globalDelaySec = Number.isFinite(v) && v >= 0 ? v : 0.2;
+  state.settings.globalDelaySec = Number.isFinite(v) && v >= 0 ? v : 1;
   state.settings.themeMode = themeSelect.value ?? "auto";
+  const pointerSize = Number(pointerSizeInput.value);
+  state.settings.pointerSizePx = Number.isFinite(pointerSize) && pointerSize > 0 ? pointerSize : 32;
+  state.settings.pointerFill = pointerFillInput.value || "#000000";
+  const outlineSize = Number(pointerOutlineInput.value);
+  state.settings.pointerOutlinePx = Number.isFinite(outlineSize) && outlineSize >= 0 ? outlineSize : 2;
+  state.settings.pointerOutlineColor = pointerOutlineColorInput.value || "#ffffff";
+  state.settings.pointerShadowEnabled = pointerShadowToggle.checked;
+  const shadowOpacity = Number(pointerShadowOpacityInput.value);
+  state.settings.pointerShadowOpacity = Number.isFinite(shadowOpacity)
+    ? Math.min(1, Math.max(0, shadowOpacity / 100))
+    : 0.25;
+  const shadowBlur = Number(pointerShadowBlurInput.value);
+  state.settings.pointerShadowBlur = Number.isFinite(shadowBlur) && shadowBlur >= 0 ? shadowBlur : 8;
   applyTheme(state.settings.themeMode);
   await saveState();
   closeSettings();
@@ -138,6 +192,15 @@ addOpenUrlNode.addEventListener("click", async () => {
   render();
   closeModal();
   showStatus("✅ Open URL node added");
+});
+
+addClickNode.addEventListener("click", async () => {
+  const action = { id: uid(), type: "click", collapsed: true, jsonOpen: false, target: null, click: null };
+  state.actions.push(action);
+  await saveState();
+  render();
+  closeModal();
+  showStatus("✅ Click node added");
 });
 
 addReloadTabNode.addEventListener("click", async () => {
@@ -186,6 +249,13 @@ playBtn.addEventListener("click", async () => {
     }
     if (a.type === "openUrl" && !a.url?.trim()) {
       showStatus("⚠️ An Open URL node is missing a URL");
+      a.collapsed = false;
+      await saveState();
+      render();
+      return;
+    }
+    if (a.type === "click" && (!a.target || !a.click)) {
+      showStatus("⚠️ A Click node has no recorded target");
       a.collapsed = false;
       await saveState();
       render();
@@ -248,6 +318,13 @@ function buildJsonForAction(action) {
   }
   if (action.type === "openUrl") {
     return { type: "openUrl", url: action.url ?? "" };
+  }
+  if (action.type === "click") {
+    return {
+      type: "click",
+      target: action.target ?? null,
+      click: action.click ?? null
+    };
   }
   if (action.type === "reloadTab") {
     return { type: "reloadTab" };
@@ -323,6 +400,7 @@ function renderTimelineItem(action, idx, isLast) {
   if (action.type === "switchTab") title.textContent = "Switch Tab";
   if (action.type === "delay") title.textContent = "Delay";
   if (action.type === "openUrl") title.textContent = "Open URL";
+  if (action.type === "click") title.textContent = "Click";
   if (action.type === "reloadTab") title.textContent = "Reload Tab";
   if (action.type === "simpleLoop") title.textContent = "Simple Loop";
 
@@ -338,6 +416,9 @@ function renderTimelineItem(action, idx, isLast) {
   }
   if (action.type === "openUrl") {
     sub.textContent = action.url ? `• ${truncate(action.url, 32)}` : "• not set";
+  }
+  if (action.type === "click") {
+    sub.textContent = action.target ? `• ${truncate(action.target.label || \"target\", 32)}` : \"• not set\";
   }
   if (action.type === "reloadTab") {
     sub.textContent = "• active tab";
@@ -458,6 +539,63 @@ function renderTimelineItem(action, idx, isLast) {
     left.appendChild(input);
   }
 
+  if (action.type === "click") {
+    const recordBtn = document.createElement("button");
+    recordBtn.className = "btn primary";
+    recordBtn.textContent = "Record click";
+
+    recordBtn.addEventListener("click", async () => {
+      const tab = await getActiveTab();
+      if (!tab) {
+        showStatus("⚠️ No active tab to record.");
+        return;
+      }
+      await chrome.tabs.sendMessage(tab.id, { type: "ARM_CLICK_RECORD", actionId: action.id });
+      showStatus("🎯 Click on the page to record");
+    });
+
+    const showBtn = document.createElement("button");
+    showBtn.className = "btn";
+    showBtn.textContent = "Show click";
+    showBtn.disabled = !action.target;
+
+    showBtn.addEventListener("click", async () => {
+      if (!action.target || !action.click) {
+        showStatus("⚠️ Record a click first.");
+        return;
+      }
+      const tab = await getActiveTab();
+      if (!tab) {
+        showStatus("⚠️ No active tab to preview.");
+        return;
+      }
+      await chrome.tabs.sendMessage(tab.id, { type: "SHOW_CLICK_PREVIEW", action });
+    });
+
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "btn";
+    resetBtn.textContent = "Reset selection";
+    resetBtn.disabled = !action.target;
+    resetBtn.addEventListener("click", async () => {
+      action.target = null;
+      action.click = null;
+      await saveState();
+      render();
+      showStatus("↩️ Click selection reset");
+    });
+
+    const pill = document.createElement("div");
+    pill.className = "pill";
+    pill.textContent = action.target
+      ? `Recorded: ${truncate(action.target.label || action.target.selectors?.[0] || "target", 36)}`
+      : "No click recorded";
+
+    left.appendChild(recordBtn);
+    left.appendChild(showBtn);
+    left.appendChild(resetBtn);
+    left.appendChild(pill);
+  }
+
   if (action.type === "reloadTab") {
     const label = document.createElement("div");
     label.className = "pill";
@@ -571,6 +709,11 @@ function truncate(s, n = 28) {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
+async function getActiveTab() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tabs?.[0] ?? null;
+}
+
 // Listen for picked tab + flow progress
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "TAB_PICKED") {
@@ -582,6 +725,18 @@ chrome.runtime.onMessage.addListener((msg) => {
     saveState().then(() => {
       render();
       showStatus("✅ Tab recorded");
+    });
+  }
+
+  if (msg?.type === "CLICK_RECORDED") {
+    const action = state.actions.find((a) => a.id === msg.actionId);
+    if (!action) return;
+    action.target = msg.payload?.target ?? null;
+    action.click = msg.payload?.click ?? null;
+    action.collapsed = false;
+    saveState().then(() => {
+      render();
+      showStatus("✅ Click recorded");
     });
   }
 

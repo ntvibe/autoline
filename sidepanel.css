@@ -513,6 +513,17 @@ html, body {
   flex-direction: column;
   gap: 8px;
 }
+.toggleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.toggleRow input {
+  width: 18px;
+  height: 18px;
+}
 .label {
   font-weight: 900;
   font-size: 13px;
