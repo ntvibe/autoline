@@ -116,42 +116,60 @@
               <div class="hint">Choose a high-contrast glass theme.</div>
             </div>
 
-            <div class="formRow">
-              <label class="label" for="pointerSizeInput">Mouse pointer size (px)</label>
-              <input id="pointerSizeInput" class="input" type="number" min="8" step="1" />
-            </div>
+            <div class="pointerSection">
+              <div class="pointerSectionTitle">Pointer settings</div>
+              <div id="pointerPreview" class="pointerPreview" aria-hidden="true">
+                <div class="pointerPreviewText">
+                  Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor.
+                </div>
+                <div id="pointerPreviewPointer" class="pointerPreviewPointer">
+                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path
+                      d="M0 0 L0 20 L6 14 L9 24 L12 23 L9 13 L18 13 Z"
+                    />
+                  </svg>
+                </div>
+              </div>
 
-            <div class="formRow">
-              <label class="label" for="pointerFillInput">Mouse pointer fill</label>
-              <input id="pointerFillInput" class="input" type="color" />
-            </div>
+              <div class="pointerControls">
+                <div class="formRow">
+                  <label class="label" for="pointerSizeInput">Mouse pointer size (px)</label>
+                  <input id="pointerSizeInput" class="input" type="number" min="8" step="1" />
+                </div>
 
-            <div class="formRow">
-              <label class="label" for="pointerOutlineInput">Outline thickness (px)</label>
-              <input id="pointerOutlineInput" class="input" type="number" min="0" step="0.5" />
-            </div>
+                <div class="formRow">
+                  <label class="label" for="pointerFillInput">Mouse pointer fill</label>
+                  <input id="pointerFillInput" class="input" type="color" />
+                </div>
 
-            <div class="formRow">
-              <label class="label" for="pointerOutlineColorInput">Outline color</label>
-              <input id="pointerOutlineColorInput" class="input" type="color" />
-            </div>
+                <div class="formRow">
+                  <label class="label" for="pointerOutlineInput">Outline thickness (px)</label>
+                  <input id="pointerOutlineInput" class="input" type="number" min="0" step="0.5" />
+                </div>
 
-            <div class="formRow">
-              <label class="label" for="pointerShadowToggle">Pointer shadow</label>
-              <label class="toggleRow">
-                <input id="pointerShadowToggle" type="checkbox" />
-                <span>Enabled</span>
-              </label>
-            </div>
+                <div class="formRow">
+                  <label class="label" for="pointerOutlineColorInput">Outline color</label>
+                  <input id="pointerOutlineColorInput" class="input" type="color" />
+                </div>
 
-            <div class="formRow">
-              <label class="label" for="pointerShadowOpacityInput">Shadow transparency (%)</label>
-              <input id="pointerShadowOpacityInput" class="input" type="number" min="0" max="100" step="1" />
-            </div>
+                <div class="formRow">
+                  <label class="label" for="pointerShadowToggle">Pointer shadow</label>
+                  <label class="toggleRow">
+                    <input id="pointerShadowToggle" type="checkbox" />
+                    <span>Enabled</span>
+                  </label>
+                </div>
 
-            <div class="formRow">
-              <label class="label" for="pointerShadowBlurInput">Shadow blur (px)</label>
-              <input id="pointerShadowBlurInput" class="input" type="number" min="0" step="1" />
+                <div class="formRow">
+                  <label class="label" for="pointerShadowOpacityInput">Shadow transparency (%)</label>
+                  <input id="pointerShadowOpacityInput" class="input" type="number" min="0" max="100" step="1" />
+                </div>
+
+                <div class="formRow">
+                  <label class="label" for="pointerShadowBlurInput">Shadow blur (px)</label>
+                  <input id="pointerShadowBlurInput" class="input" type="number" min="0" step="1" />
+                </div>
+              </div>
             </div>
 
             <div class="formActions">

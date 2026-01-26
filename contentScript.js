@@ -39,6 +39,17 @@
         box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.35);
         animation: autolineDotPulse 0.9s ease-in-out infinite;
       }
+      .autoline-perform-dot {
+        position: fixed;
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(255, 0, 0, 0.9);
+        box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.35);
+        animation: autolineDotPulse 0.9s ease-in-out;
+        pointer-events: none;
+        z-index: 2147483646;
+      }
       #${PREVIEW_ID}.autoline-fade {
         animation: autolineFadeOut 2s ease-in-out forwards;
       }
@@ -297,6 +308,16 @@
     window.setTimeout(removePreview, 2000);
   }
 
+  function showClickIndicator(x, y) {
+    ensureStyles();
+    const dot = document.createElement("div");
+    dot.className = "autoline-perform-dot";
+    dot.style.left = `${x - 5}px`;
+    dot.style.top = `${y - 5}px`;
+    document.body.appendChild(dot);
+    window.setTimeout(() => dot.remove(), 900);
+  }
+
   function ensurePointer(settings) {
     ensureStyles();
     let pointer = document.getElementById(POINTER_ID);
@@ -304,8 +325,8 @@
       pointer = document.createElement("div");
       pointer.id = POINTER_ID;
       pointer.innerHTML = `
-        <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="m 84.129429,138.16588 -6.033788,-16.09011\n a 1.0349787,1.0349787 134.82411 0 1 1.326529,-1.3347\n l 16.080445,5.91781\n a 0.71192652,0.71192652 92.708471 0 1 -0.06417,1.35647\n l -5.792329,1.52902\n a 3.8207454,3.8207454 134.62447 0 0 -2.731492,2.76754\n l -1.444402,5.7776\n a 0.70328462,0.70328462 176.74011 0 1 -1.340793,0.0764\n z" />
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M0 0 L0 20 L6 14 L9 24 L12 23 L9 13 L18 13 Z" />
         </svg>
       `;
       document.body.appendChild(pointer);
@@ -324,8 +345,8 @@
 
     const svg = pointer.querySelector("svg");
     if (svg) {
-      svg.setAttribute("width", String(size));
-      svg.setAttribute("height", String(size));
+      svg.setAttribute("width", "100%");
+      svg.setAttribute("height", "100%");
       const path = svg.querySelector("path");
       if (path) {
         path.setAttribute("fill", fill);
@@ -451,6 +472,10 @@
         click: {
           x: resolved.click.x,
           y: resolved.click.y
+        },
+        viewport: {
+          width: window.innerWidth,
+          height: window.innerHeight
         }
       });
       return true;
@@ -493,6 +518,9 @@
       }
       const x = resolved.click.x;
       const y = resolved.click.y;
+      if (msg.showDot !== false) {
+        showClickIndicator(x, y);
+      }
       const target = document.elementFromPoint(x, y) || resolved.target;
       try {
         target.focus?.({ preventScroll: true });
