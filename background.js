@@ -2,6 +2,7 @@
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chunkDelay = 150;
+const urlSchemeRegex = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 
 // Open side panel on icon click
 chrome.runtime.onInstalled.addListener(async () => {
@@ -150,7 +151,7 @@ async function runFlow(actions, settings, runId) {
       }
 
       if (step.type === "openUrl") {
-        const url = step.url;
+        const url = normalizeUrl(step.url);
         if (!url) throw new Error("Open URL node missing a URL.");
         const tab = await getActiveTab();
         if (!tab) throw new Error("No active tab to navigate.");
@@ -208,4 +209,12 @@ async function sleepWithPause(ms, runId) {
 async function getActiveTab() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs?.[0] ?? null;
+}
+
+function normalizeUrl(rawUrl) {
+  if (typeof rawUrl !== "string") return "";
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return "";
+  if (urlSchemeRegex.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
 }
