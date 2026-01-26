@@ -281,12 +281,42 @@
     );
   }
 
-  function scrollTargetIntoView(target) {
+  function waitForScrollToSettle(timeoutMs = 1200, stableMs = 120) {
+    const scrollingElement = document.scrollingElement || document.documentElement;
+    if (!scrollingElement) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const start = performance.now();
+      let lastX = scrollingElement.scrollLeft;
+      let lastY = scrollingElement.scrollTop;
+      let lastChange = performance.now();
+      const check = () => {
+        const now = performance.now();
+        const nextX = scrollingElement.scrollLeft;
+        const nextY = scrollingElement.scrollTop;
+        if (nextX !== lastX || nextY !== lastY) {
+          lastX = nextX;
+          lastY = nextY;
+          lastChange = now;
+        }
+        if (now - lastChange >= stableMs) {
+          resolve(true);
+          return;
+        }
+        if (now - start >= timeoutMs) {
+          resolve(false);
+          return;
+        }
+        requestAnimationFrame(check);
+      };
+      requestAnimationFrame(check);
+    });
+  }
+
+  async function scrollTargetIntoView(target) {
     if (!(target instanceof Element)) return Promise.resolve(false);
     target.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
-    return new Promise((resolve) => {
-      window.setTimeout(() => resolve(true), 350);
-    });
+    await waitForScrollToSettle();
+    return true;
   }
 
   function waitForClickPosition(action, timeoutMs = 800) {
