@@ -318,11 +318,16 @@ async function runFlow(actions, settings, runId) {
         await ensureDebuggerLock(tab.id, "flow");
         const mode = step.mode === "paste" ? "paste" : "copy";
         const info = await getPlatformInfo();
-        const modifiers = getShortcutModifier(info.os);
+        const modifierSpec = getModifierKeySpec(info.os);
+        const keySpecBase = {
+          key: mode === "copy" ? "c" : "v",
+          code: mode === "copy" ? "KeyC" : "KeyV",
+          windowsVirtualKeyCode: mode === "copy" ? 67 : 86
+        };
         if (mode === "copy") {
-          await dispatchShortcut(tab.id, { key: "c", code: "KeyC", windowsVirtualKeyCode: 67, modifiers });
+          await dispatchModifierShortcut(tab.id, modifierSpec, keySpecBase);
         } else {
-          await dispatchShortcut(tab.id, { key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers });
+          await dispatchModifierShortcut(tab.id, modifierSpec, keySpecBase);
         }
 
         let source = "keyboard";
@@ -598,6 +603,25 @@ async function dispatchShortcut(tabId, keySpec) {
   await dispatchKey(tabId, keySpec, "keyUp");
 }
 
+async function dispatchModifierShortcut(tabId, modifierSpec, keySpec) {
+  const modifierDown = {
+    key: modifierSpec.key,
+    code: modifierSpec.code,
+    windowsVirtualKeyCode: modifierSpec.windowsVirtualKeyCode,
+    modifiers: modifierSpec.modifier
+  };
+  const modifierUp = {
+    key: modifierSpec.key,
+    code: modifierSpec.code,
+    windowsVirtualKeyCode: modifierSpec.windowsVirtualKeyCode,
+    modifiers: 0
+  };
+  await dispatchKey(tabId, modifierDown, "keyDown");
+  await dispatchKey(tabId, { ...keySpec, modifiers: modifierSpec.modifier }, "keyDown");
+  await dispatchKey(tabId, { ...keySpec, modifiers: modifierSpec.modifier }, "keyUp");
+  await dispatchKey(tabId, modifierUp, "keyUp");
+}
+
 function sendDebuggerCommand(tabId, method, params) {
   return new Promise((resolve, reject) => {
     chrome.debugger.sendCommand({ tabId }, method, params, (result) => {
@@ -621,6 +645,23 @@ function getPlatformInfo() {
 
 function getShortcutModifier(os) {
   return os === "mac" ? 4 : 2;
+}
+
+function getModifierKeySpec(os) {
+  if (os === "mac") {
+    return {
+      key: "Meta",
+      code: "MetaLeft",
+      windowsVirtualKeyCode: 91,
+      modifier: 4
+    };
+  }
+  return {
+    key: "Control",
+    code: "ControlLeft",
+    windowsVirtualKeyCode: 17,
+    modifier: 2
+  };
 }
 
 function isSheetsUrl(url) {
