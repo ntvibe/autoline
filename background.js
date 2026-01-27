@@ -4,6 +4,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chunkDelay = 150;
 const urlSchemeRegex = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 const attachedDebugTabs = new Set();
+const debugLocks = new Map();
 let clipboardCache = "";
 
 // Open side panel on icon click
@@ -87,12 +88,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       chrome.runtime.sendMessage({ type: "FLOW_STOP" });
       const active = await getActiveTab();
       if (active) await sendMessageToTab(active.id, { type: "POINTER_HIDE" });
+      if (active?.id) {
+        await releaseDebuggerLock(active.id, "flow");
+      }
       sendResponse({ ok: true });
       return;
     }
 
     if (msg?.type === "CLICK_RECORDED") {
+      if (sender?.tab?.id) {
+        await releaseDebuggerLock(sender.tab.id, "record");
+      }
       chrome.runtime.sendMessage(msg);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (msg?.type === "DEBUG_ATTACH") {
+      const tabId = msg.tabId ?? sender?.tab?.id;
+      if (typeof tabId !== "number") {
+        sendResponse({ ok: false, error: "Missing tabId." });
+        return;
+      }
+      await ensureDebuggerLock(tabId, msg.reason || "manual");
+      if (Number.isFinite(msg.autoDetachMs) && msg.autoDetachMs > 0) {
+        const reason = msg.reason || "manual";
+        setTimeout(() => {
+          releaseDebuggerLock(tabId, reason);
+        }, msg.autoDetachMs);
+      }
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (msg?.type === "DEBUG_DETACH") {
+      const tabId = msg.tabId ?? sender?.tab?.id;
+      if (typeof tabId !== "number") {
+        sendResponse({ ok: false, error: "Missing tabId." });
+        return;
+      }
+      await releaseDebuggerLock(tabId, msg.reason || "manual");
       sendResponse({ ok: true });
       return;
     }
@@ -134,30 +169,42 @@ async function runFlow(actions, settings, runId) {
   const globalDelayMs = Math.max(0, Number(settings.globalDelaySec ?? 1)) * 1000;
   const loopEnabled = actions.some((action) => action.type === "simpleLoop" && action.enabled !== false);
   let pointerVisible = false;
+  let flowTabId = null;
 
-  let shouldLoop = true;
-  while (shouldLoop) {
-    if (!isActiveRun(runId)) return;
-    chrome.runtime.sendMessage({ type: "FLOW_START" });
-
-    for (let i = 0; i < actions.length; i++) {
-      const step = actions[i];
+  try {
+    let shouldLoop = true;
+    while (shouldLoop) {
       if (!isActiveRun(runId)) return;
-      await waitIfPaused(runId);
-      if (!isActiveRun(runId)) return;
-
-      chrome.runtime.sendMessage({ type: "FLOW_STEP_START", actionId: step.id, index: i });
-
-      if (step.type === "switchTab") {
-        const tabId = step.tab?.tabId;
-        if (typeof tabId !== "number") throw new Error("Switch Tab node missing tabId.");
-
-        // Activate tab
-        await chrome.tabs.update(tabId, { active: true });
-
-        // Give the browser a moment to actually switch visually
-        await sleep(150);
+      chrome.runtime.sendMessage({ type: "FLOW_START" });
+      const activeTab = await getActiveTab();
+      if (activeTab?.id) {
+        flowTabId = activeTab.id;
+        await ensureDebuggerLock(flowTabId, "flow");
       }
+
+      for (let i = 0; i < actions.length; i++) {
+        const step = actions[i];
+        if (!isActiveRun(runId)) return;
+        await waitIfPaused(runId);
+        if (!isActiveRun(runId)) return;
+
+        chrome.runtime.sendMessage({ type: "FLOW_STEP_START", actionId: step.id, index: i });
+
+        if (step.type === "switchTab") {
+          const tabId = step.tab?.tabId;
+          if (typeof tabId !== "number") throw new Error("Switch Tab node missing tabId.");
+
+          // Activate tab
+          await chrome.tabs.update(tabId, { active: true });
+
+          // Give the browser a moment to actually switch visually
+          await sleep(150);
+          if (flowTabId && flowTabId !== tabId) {
+            await releaseDebuggerLock(flowTabId, "flow");
+          }
+          flowTabId = tabId;
+          await ensureDebuggerLock(flowTabId, "flow");
+        }
 
       if (step.type === "delay") {
         const ms = Math.max(0, Number(step.delaySec ?? 1)) * 1000;
@@ -268,40 +315,62 @@ async function runFlow(actions, settings, runId) {
         }
       }
 
-      chrome.runtime.sendMessage({ type: "FLOW_STEP_END", actionId: step.id, index: i });
-
-      // Global delay between steps (don’t add extra after last)
-      if (i !== actions.length - 1 && globalDelayMs > 0) {
-        const nextStep = actions[i + 1];
-        if (step.type === "click" && nextStep?.type === "click") {
-          const tab = await getActiveTab();
-          if (tab) {
-            const nextResolved = await ensureClickVisible(tab.id, nextStep);
-            if (nextResolved) {
-              await sendMessageToTab(tab.id, {
-                type: "POINTER_MOVE",
-                x: nextResolved.click.x,
-                y: nextResolved.click.y,
-                duration: globalDelayMs,
-                settings
-              });
-            }
+      if (step.type === "keyboard") {
+        const tab = await getActiveTab();
+        if (!tab) throw new Error("No active tab for keyboard action.");
+        await ensureDebuggerLock(tab.id, "flow");
+        const keySpec = getKeySpec(step.key);
+        if (!keySpec) throw new Error("Keyboard node missing a key selection.");
+        const pressCount = Math.max(1, Math.round(Number(step.pressCount) || 1));
+        const delayMs = Math.max(0, Number(step.delaySec ?? 1)) * 1000;
+        for (let press = 0; press < pressCount; press += 1) {
+          await dispatchKey(tab.id, keySpec, "keyDown");
+          await dispatchKey(tab.id, keySpec, "keyUp");
+          if (press < pressCount - 1 && delayMs > 0) {
+            await sleepWithPause(delayMs, runId);
           }
         }
-        await sleepWithPause(globalDelayMs, runId);
+      }
+
+        chrome.runtime.sendMessage({ type: "FLOW_STEP_END", actionId: step.id, index: i });
+
+      // Global delay between steps (don’t add extra after last)
+        if (i !== actions.length - 1 && globalDelayMs > 0) {
+          const nextStep = actions[i + 1];
+          if (step.type === "click" && nextStep?.type === "click") {
+            const tab = await getActiveTab();
+            if (tab) {
+              const nextResolved = await ensureClickVisible(tab.id, nextStep);
+              if (nextResolved) {
+                await sendMessageToTab(tab.id, {
+                  type: "POINTER_MOVE",
+                  x: nextResolved.click.x,
+                  y: nextResolved.click.y,
+                  duration: globalDelayMs,
+                  settings
+                });
+              }
+            }
+          }
+          await sleepWithPause(globalDelayMs, runId);
+        }
+      }
+
+      if (!loopEnabled || !isActiveRun(runId)) {
+        shouldLoop = false;
       }
     }
 
-    if (!loopEnabled || !isActiveRun(runId)) {
-      shouldLoop = false;
+    if (!isActiveRun(runId)) return;
+    chrome.runtime.sendMessage({ type: "FLOW_END" });
+    const active = await getActiveTab();
+    if (active) await sendMessageToTab(active.id, { type: "POINTER_HIDE" });
+    runController.running = false;
+  } finally {
+    if (flowTabId) {
+      await releaseDebuggerLock(flowTabId, "flow");
     }
   }
-
-  if (!isActiveRun(runId)) return;
-  chrome.runtime.sendMessage({ type: "FLOW_END" });
-  const active = await getActiveTab();
-  if (active) await sendMessageToTab(active.id, { type: "POINTER_HIDE" });
-  runController.running = false;
 }
 
 function isActiveRun(runId) {
@@ -399,9 +468,29 @@ async function detachDebugger(tabId) {
   attachedDebugTabs.delete(tabId);
 }
 
+async function ensureDebuggerLock(tabId, reason) {
+  const lockSet = debugLocks.get(tabId) ?? new Set();
+  if (!lockSet.has(reason)) {
+    lockSet.add(reason);
+    debugLocks.set(tabId, lockSet);
+  }
+  await ensureDebuggerAttached(tabId);
+}
+
+async function releaseDebuggerLock(tabId, reason) {
+  const lockSet = debugLocks.get(tabId);
+  if (!lockSet) return;
+  lockSet.delete(reason);
+  if (lockSet.size === 0) {
+    debugLocks.delete(tabId);
+    await detachDebugger(tabId);
+  } else {
+    debugLocks.set(tabId, lockSet);
+  }
+}
+
 async function realClick(tabId, x, y, count = 1) {
   const safeCount = Math.min(3, Math.max(1, Number(count) || 1));
-  const attachedNow = await ensureDebuggerAttached(tabId);
   try {
     await dispatchMouse(tabId, { type: "mouseMoved", x, y, buttons: 0 });
     for (let index = 1; index <= safeCount; index += 1) {
@@ -426,8 +515,45 @@ async function realClick(tabId, x, y, count = 1) {
       }
     }
   } finally {
-    if (attachedNow) {
-      await detachDebugger(tabId);
-    }
+  }
+}
+
+function dispatchKey(tabId, keySpec, type) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand({ tabId }, "Input.dispatchKeyEvent", { type, ...keySpec }, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function getKeySpec(key) {
+  switch (key) {
+    case "ctrlA":
+      return {
+        key: "a",
+        code: "KeyA",
+        windowsVirtualKeyCode: 65,
+        modifiers: 2
+      };
+    case "delete":
+      return { key: "Delete", code: "Delete", windowsVirtualKeyCode: 46 };
+    case "backspace":
+      return { key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 };
+    case "arrowUp":
+      return { key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 };
+    case "arrowDown":
+      return { key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 };
+    case "arrowLeft":
+      return { key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 };
+    case "arrowRight":
+      return { key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 };
+    case "enter":
+      return { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 };
+    default:
+      return null;
   }
 }

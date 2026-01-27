@@ -12,6 +12,7 @@ const addClickNode = document.getElementById("addClickNode");
 const addReloadTabNode = document.getElementById("addReloadTabNode");
 const addSimpleLoopNode = document.getElementById("addSimpleLoopNode");
 const addClipboardNode = document.getElementById("addClipboardNode");
+const addKeyboardNode = document.getElementById("addKeyboardNode");
 
 const settingsBackdrop = document.getElementById("settingsBackdrop");
 const closeSettingsBtn = document.getElementById("closeSettingsBtn");
@@ -46,7 +47,7 @@ let state = {
   },
   actions: []
   // action:
-  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"clipboard", collapsed: true, jsonOpen: false }
+  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"clipboard"|"keyboard", collapsed: true, jsonOpen: false }
 };
 
 let runState = {
@@ -106,6 +107,13 @@ async function loadState() {
     if (a.type === "simpleLoop" && typeof a.enabled !== "boolean") a.enabled = true;
     if (a.type === "clipboard" && !["copy", "paste"].includes(a.mode)) {
       a.mode = "copy";
+    }
+    if (a.type === "keyboard") {
+      if (!["ctrlA", "delete", "backspace", "arrowUp", "arrowDown", "arrowLeft", "arrowRight", "enter"].includes(a.key)) {
+        a.key = "ctrlA";
+      }
+      if (!Number.isFinite(a.pressCount) || a.pressCount < 1) a.pressCount = 1;
+      if (!Number.isFinite(a.delaySec) || a.delaySec < 0) a.delaySec = 1;
     }
   }
 
@@ -300,6 +308,23 @@ addClipboardNode.addEventListener("click", async () => {
   showStatus("✅ Clipboard node added");
 });
 
+addKeyboardNode.addEventListener("click", async () => {
+  const action = {
+    id: uid(),
+    type: "keyboard",
+    collapsed: true,
+    jsonOpen: false,
+    key: "ctrlA",
+    pressCount: 1,
+    delaySec: 1
+  };
+  state.actions.push(action);
+  await saveState();
+  render();
+  closeModal();
+  showStatus("✅ Keyboard node added");
+});
+
 playBtn.addEventListener("click", async () => {
   if (runState.status === "running") {
     await chrome.runtime.sendMessage({ type: "PAUSE_FLOW" });
@@ -416,6 +441,14 @@ function buildJsonForAction(action) {
   if (action.type === "clipboard") {
     return { type: "clipboard", mode: action.mode ?? "copy" };
   }
+  if (action.type === "keyboard") {
+    return {
+      type: "keyboard",
+      key: action.key ?? "ctrlA",
+      pressCount: Number.isFinite(action.pressCount) ? Math.max(1, Math.round(action.pressCount)) : 1,
+      delaySec: Number.isFinite(action.delaySec) ? Math.max(0, action.delaySec) : 1
+    };
+  }
   return { type: action.type };
 }
 
@@ -494,6 +527,7 @@ function renderTimelineItem(action, idx, isLast) {
   if (action.type === "reloadTab") title.textContent = "Reload Tab";
   if (action.type === "simpleLoop") title.textContent = "Simple Loop";
   if (action.type === "clipboard") title.textContent = "Clipboard";
+  if (action.type === "keyboard") title.textContent = "Keyboard";
 
   const sub = document.createElement("span");
   sub.className = "headerSub";
@@ -521,6 +555,19 @@ function renderTimelineItem(action, idx, isLast) {
   }
   if (action.type === "clipboard") {
     sub.textContent = action.mode === "paste" ? "• paste clipboard" : "• copy selection";
+  }
+  if (action.type === "keyboard") {
+    const label = {
+      ctrlA: "Ctrl+A",
+      delete: "Delete",
+      backspace: "Backspace",
+      arrowUp: "Arrow Up",
+      arrowDown: "Arrow Down",
+      arrowLeft: "Arrow Left",
+      arrowRight: "Arrow Right",
+      enter: "Enter"
+    }[action.key];
+    sub.textContent = `• ${label || "key"} ×${Number(action.pressCount ?? 1)}`;
   }
 
   const headerRight = document.createElement("div");
@@ -646,6 +693,7 @@ function renderTimelineItem(action, idx, isLast) {
         showStatus("⚠️ No active tab to record.");
         return;
       }
+      await chrome.runtime.sendMessage({ type: "DEBUG_ATTACH", tabId: tab.id, reason: "record" });
       await chrome.tabs.sendMessage(tab.id, { type: "ARM_CLICK_RECORD", actionId: action.id });
       showStatus("🎯 Click on the page to record");
     });
@@ -665,6 +713,12 @@ function renderTimelineItem(action, idx, isLast) {
         showStatus("⚠️ No active tab to preview.");
         return;
       }
+      await chrome.runtime.sendMessage({
+        type: "DEBUG_ATTACH",
+        tabId: tab.id,
+        reason: "preview",
+        autoDetachMs: 2500
+      });
       await chrome.tabs.sendMessage(tab.id, { type: "SHOW_CLICK_PREVIEW", action });
     });
 
@@ -778,6 +832,75 @@ function renderTimelineItem(action, idx, isLast) {
 
     left.appendChild(label);
     left.appendChild(select);
+  }
+
+  if (action.type === "keyboard") {
+    const keyLabel = document.createElement("div");
+    keyLabel.className = "pill";
+    keyLabel.textContent = "Key command";
+
+    const keySelect = document.createElement("select");
+    keySelect.className = "select";
+    keySelect.style.minWidth = "180px";
+    keySelect.innerHTML = `
+      <option value="ctrlA">Ctrl + A (Select all)</option>
+      <option value="delete">Delete</option>
+      <option value="backspace">Backspace</option>
+      <option value="arrowUp">Arrow Up</option>
+      <option value="arrowDown">Arrow Down</option>
+      <option value="arrowLeft">Arrow Left</option>
+      <option value="arrowRight">Arrow Right</option>
+      <option value="enter">Enter</option>
+    `;
+    keySelect.value = action.key ?? "ctrlA";
+    keySelect.addEventListener("change", async () => {
+      action.key = keySelect.value;
+      await saveState();
+      render();
+    });
+
+    const pressLabel = document.createElement("div");
+    pressLabel.className = "pill";
+    pressLabel.textContent = "Press count";
+
+    const pressInput = document.createElement("input");
+    pressInput.className = "input";
+    pressInput.type = "number";
+    pressInput.min = "1";
+    pressInput.step = "1";
+    pressInput.style.width = "110px";
+    pressInput.value = String(action.pressCount ?? 1);
+    pressInput.addEventListener("change", async () => {
+      const v = Number(pressInput.value);
+      action.pressCount = Number.isFinite(v) ? Math.max(1, Math.round(v)) : 1;
+      await saveState();
+      render();
+    });
+
+    const delayLabel = document.createElement("div");
+    delayLabel.className = "pill";
+    delayLabel.textContent = "Delay (sec)";
+
+    const delayInput = document.createElement("input");
+    delayInput.className = "input";
+    delayInput.type = "number";
+    delayInput.min = "0";
+    delayInput.step = "0.1";
+    delayInput.style.width = "110px";
+    delayInput.value = String(action.delaySec ?? 1);
+    delayInput.addEventListener("change", async () => {
+      const v = Number(delayInput.value);
+      action.delaySec = Number.isFinite(v) ? Math.max(0, v) : 1;
+      await saveState();
+      render();
+    });
+
+    left.appendChild(keyLabel);
+    left.appendChild(keySelect);
+    left.appendChild(pressLabel);
+    left.appendChild(pressInput);
+    left.appendChild(delayLabel);
+    left.appendChild(delayInput);
   }
 
   const del2 = document.createElement("button");
