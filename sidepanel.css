@@ -118,6 +118,53 @@ html, body {
   letter-spacing: 0.08em;
 }
 
+.actionsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0 10px 0;
+}
+
+.workflowTitle {
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
+
+.workflowNameInput {
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  padding: 4px 6px;
+  border-radius: 10px;
+  width: 100%;
+  max-width: 220px;
+  cursor: text;
+}
+
+.workflowNameInput:hover {
+  border-color: rgba(var(--accent-rgb), 0.3);
+  color: var(--text);
+}
+
+.workflowNameInput:focus {
+  outline: none;
+  border-color: rgba(var(--accent-rgb), 0.6);
+  color: var(--text);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.actionsHeaderBtns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .actionsList {
   display: flex;
   flex-direction: column;
@@ -379,6 +426,28 @@ html, body {
 }
 .deleteBtn .material-icons { font-size: 18px; color: var(--danger); }
 
+.duplicateBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, border 120ms ease;
+}
+.card:hover .duplicateBtn,
+.cardHeader:hover .duplicateBtn {
+  opacity: 1;
+}
+.duplicateBtn:hover {
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-rgb), 0.25);
+}
+.duplicateBtn .material-icons { font-size: 18px; color: var(--text); }
+
 .cardBody {
   padding: 12px;
   border-top: 1px solid var(--line);
@@ -489,6 +558,10 @@ html, body {
   backdrop-filter: var(--glass);
 }
 
+.modalWide {
+  max-width: 520px;
+}
+
 .modalHeader {
   display: flex;
   align-items: center;
@@ -504,6 +577,71 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.workflowsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workflowItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(var(--accent-rgb), 0.04);
+  cursor: pointer;
+  transition: border 120ms ease, background 120ms ease;
+}
+
+.workflowItem:hover {
+  border-color: rgba(var(--accent-rgb), 0.4);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+.workflowItemName {
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.workflowItemActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workflowActionBtn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 10px;
+  padding: 4px 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, border 120ms ease, color 120ms ease;
+}
+
+.workflowItem:hover .workflowActionBtn {
+  opacity: 1;
+}
+
+.workflowActionBtn:hover {
+  color: var(--text);
+  border-color: rgba(var(--accent-rgb), 0.35);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+.workflowJsonBtn {
+  opacity: 1;
+  border-color: rgba(var(--accent-rgb), 0.2);
+}
+
+.workflowJsonBox {
+  max-height: 320px;
 }
 
 .nodeItem {

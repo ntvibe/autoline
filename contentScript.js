@@ -522,13 +522,29 @@
   }
 
   async function copySelectionToClipboard() {
-    const selection = window.getSelection();
-    const text = selection ? selection.toString() : "";
+    let text = "";
+    let source = "selection";
+    let cellRef = "";
+
+    if (isGoogleSheets()) {
+      const sheetsResult = readSheetsSelection();
+      if (sheetsResult.ok) {
+        text = sheetsResult.value ?? "";
+        cellRef = sheetsResult.cellRef ?? "";
+        source = "sheets";
+      }
+    }
+
+    if (source !== "sheets") {
+      const selection = window.getSelection();
+      text = selection ? selection.toString() : "";
+    }
+
     try {
       await navigator.clipboard.writeText(text);
-      return { ok: true, text };
+      return { ok: true, text, source, cellRef };
     } catch (e) {
-      return { ok: false, text, error: e?.message || "Clipboard write failed" };
+      return { ok: false, text, source, cellRef, error: e?.message || "Clipboard write failed" };
     }
   }
 
@@ -757,7 +773,11 @@
           return;
         }
         const insertResult = insertTextIntoActiveElement(readResult.text ?? "");
-        sendResponse(insertResult.ok ? { ok: true, usedFallback: readResult.fallback } : insertResult);
+        sendResponse(
+          insertResult.ok
+            ? { ok: true, usedFallback: readResult.fallback, source: isGoogleSheets() ? "sheets" : "active" }
+            : insertResult
+        );
       })();
       return true;
     }
