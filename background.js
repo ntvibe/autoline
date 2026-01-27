@@ -319,7 +319,18 @@ async function runFlow(actions, settings, runId) {
         const mode = step.mode === "paste" ? "paste" : "copy";
         const info = await getPlatformInfo();
         const modifiers = getShortcutModifier(info.os);
-        if (mode === "copy") {
+        const contentResponse = await sendMessageToTab(tab.id, {
+          type: mode === "copy" ? "CLIPBOARD_COPY_SELECTION" : "CLIPBOARD_PASTE"
+        });
+        if (contentResponse?.ok) {
+          chrome.runtime.sendMessage({
+            type: "FLOW_CLIPBOARD_RESULT",
+            actionId: step.id,
+            mode,
+            source: contentResponse.source,
+            cellRef: contentResponse.cellRef
+          });
+        } else if (mode === "copy") {
           await dispatchShortcut(tab.id, { key: "c", code: "KeyC", windowsVirtualKeyCode: 67, modifiers });
         } else {
           await dispatchShortcut(tab.id, { key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers });

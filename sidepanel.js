@@ -30,6 +30,19 @@ const pointerShadowBlurInput = document.getElementById("pointerShadowBlurInput")
 const pointerPreview = document.getElementById("pointerPreview");
 const pointerPreviewPointer = document.getElementById("pointerPreviewPointer");
 
+const workflowNameInput = document.getElementById("workflowNameInput");
+const workflowsBtn = document.getElementById("workflowsBtn");
+const saveWorkflowBtn = document.getElementById("saveWorkflowBtn");
+const workflowsBackdrop = document.getElementById("workflowsBackdrop");
+const closeWorkflowsBtn = document.getElementById("closeWorkflowsBtn");
+const workflowsList = document.getElementById("workflowsList");
+const workflowJsonBackdrop = document.getElementById("workflowJsonBackdrop");
+const workflowJsonTitle = document.getElementById("workflowJsonTitle");
+const workflowJsonText = document.getElementById("workflowJsonText");
+const closeWorkflowJsonBtn = document.getElementById("closeWorkflowJsonBtn");
+const copyWorkflowJsonBtn = document.getElementById("copyWorkflowJsonBtn");
+const backToWorkflowsBtn = document.getElementById("backToWorkflowsBtn");
+
 const actionsList = document.getElementById("actionsList");
 const statusEl = document.getElementById("status");
 
@@ -46,7 +59,8 @@ let state = {
     pointerShadowOpacity: 0.25,
     pointerShadowBlur: 8
   },
-  actions: []
+  actions: [],
+  workflowName: "Workflow"
   // action:
   // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"clipboard"|"keyboard"|"sheetsCheckValue", collapsed: true, jsonOpen: false }
 };
@@ -57,6 +71,9 @@ let runState = {
   doneIds: new Set(),
   checkResults: new Map()
 };
+
+let workflows = [];
+let activeJsonWorkflowId = null;
 
 function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
@@ -94,6 +111,9 @@ async function loadState() {
   if (typeof state.settings.pointerShadowBlur !== "number") {
     state.settings.pointerShadowBlur = 8;
   }
+  if (typeof state.workflowName !== "string" || !state.workflowName.trim()) {
+    state.workflowName = "Workflow";
+  }
 
   for (const a of state.actions) {
     if (typeof a.collapsed !== "boolean") a.collapsed = true;
@@ -125,12 +145,22 @@ async function loadState() {
     }
   }
 
+  await loadWorkflows();
   render();
   applyTheme(state.settings.themeMode);
 }
 
 async function saveState() {
   await chrome.storage.local.set({ autolineState: state });
+}
+
+async function loadWorkflows() {
+  const res = await chrome.storage.local.get("autolineWorkflows");
+  workflows = Array.isArray(res.autolineWorkflows) ? res.autolineWorkflows : [];
+}
+
+async function saveWorkflows() {
+  await chrome.storage.local.set({ autolineWorkflows: workflows });
 }
 
 function openModal() {
@@ -209,6 +239,84 @@ settingsBackdrop.addEventListener("click", (e) => {
   if (e.target === settingsBackdrop) closeSettings();
 });
 
+function openWorkflows() {
+  renderWorkflowsList();
+  workflowsBackdrop.classList.remove("hidden");
+}
+
+function closeWorkflows() {
+  workflowsBackdrop.classList.add("hidden");
+}
+
+function openWorkflowJson(workflow) {
+  activeJsonWorkflowId = workflow.id;
+  workflowJsonTitle.textContent = `Workflow JSON • ${workflow.name}`;
+  workflowJsonText.textContent = JSON.stringify(workflow.data, null, 2);
+  workflowJsonBackdrop.classList.remove("hidden");
+  workflowsBackdrop.classList.add("hidden");
+}
+
+function closeWorkflowJson() {
+  workflowJsonBackdrop.classList.add("hidden");
+  activeJsonWorkflowId = null;
+}
+
+workflowsBtn.addEventListener("click", openWorkflows);
+closeWorkflowsBtn.addEventListener("click", closeWorkflows);
+workflowsBackdrop.addEventListener("click", (e) => {
+  if (e.target === workflowsBackdrop) closeWorkflows();
+});
+
+closeWorkflowJsonBtn.addEventListener("click", () => {
+  closeWorkflowJson();
+  openWorkflows();
+});
+backToWorkflowsBtn.addEventListener("click", () => {
+  closeWorkflowJson();
+  openWorkflows();
+});
+workflowJsonBackdrop.addEventListener("click", (e) => {
+  if (e.target === workflowJsonBackdrop) {
+    closeWorkflowJson();
+    openWorkflows();
+  }
+});
+
+copyWorkflowJsonBtn.addEventListener("click", async () => {
+  const text = workflowJsonText.textContent || "";
+  try {
+    await navigator.clipboard.writeText(text);
+    showStatus("✅ Workflow JSON copied");
+  } catch (e) {
+    showStatus("⚠️ Unable to copy JSON");
+  }
+});
+
+workflowNameInput.addEventListener("click", () => {
+  workflowNameInput.readOnly = false;
+  workflowNameInput.focus();
+  workflowNameInput.select();
+});
+
+workflowNameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    workflowNameInput.blur();
+  }
+  if (e.key === "Escape") {
+    workflowNameInput.value = state.workflowName ?? "Workflow";
+    workflowNameInput.blur();
+  }
+});
+
+workflowNameInput.addEventListener("blur", async () => {
+  const nextName = workflowNameInput.value.trim() || "Workflow";
+  state.workflowName = nextName;
+  workflowNameInput.value = nextName;
+  workflowNameInput.readOnly = true;
+  await saveState();
+});
+
 [
   pointerSizeInput,
   pointerFillInput,
@@ -242,6 +350,19 @@ saveSettingsBtn.addEventListener("click", async () => {
   await saveState();
   closeSettings();
   showStatus("✅ Settings saved");
+});
+
+saveWorkflowBtn.addEventListener("click", async () => {
+  const name = workflowNameInput.value.trim() || "Workflow";
+  const payload = {
+    id: uid(),
+    name,
+    data: JSON.parse(JSON.stringify({ actions: state.actions, settings: state.settings }))
+  };
+  workflows.unshift(payload);
+  await saveWorkflows();
+  renderWorkflowsList();
+  showStatus("✅ Workflow saved");
 });
 
 addSwitchTabNode.addEventListener("click", async () => {
@@ -432,6 +553,12 @@ function iconDelete() {
   `;
 }
 
+function iconDuplicate() {
+  return `
+    <span class="material-icons" aria-hidden="true">content_copy</span>
+  `;
+}
+
 function buildJsonForAction(action) {
   if (action.type === "switchTab") {
     return {
@@ -484,6 +611,9 @@ function buildJsonForAction(action) {
 }
 
 function render() {
+  if (workflowNameInput) {
+    workflowNameInput.value = state.workflowName ?? "Workflow";
+  }
   actionsList.innerHTML = "";
 
   if (!state.actions.length) {
@@ -500,6 +630,86 @@ function render() {
   });
 
   setPlayButtonState();
+}
+
+function renderWorkflowsList() {
+  workflowsList.innerHTML = "";
+
+  if (!workflows.length) {
+    const empty = document.createElement("div");
+    empty.className = "pill";
+    empty.textContent = "No saved workflows yet.";
+    workflowsList.appendChild(empty);
+    return;
+  }
+
+  workflows.forEach((workflow) => {
+    const item = document.createElement("div");
+    item.className = "workflowItem";
+
+    const name = document.createElement("div");
+    name.className = "workflowItemName";
+    name.textContent = workflow.name || "Workflow";
+
+    const actions = document.createElement("div");
+    actions.className = "workflowItemActions";
+
+    const jsonBtn = document.createElement("button");
+    jsonBtn.className = "workflowActionBtn workflowJsonBtn";
+    jsonBtn.type = "button";
+    jsonBtn.textContent = "JSON";
+    jsonBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openWorkflowJson(workflow);
+    });
+
+    const renameBtn = document.createElement("button");
+    renameBtn.className = "workflowActionBtn";
+    renameBtn.type = "button";
+    renameBtn.innerHTML = `<span class="material-icons" aria-hidden="true">edit</span>`;
+    renameBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const nextName = window.prompt("Rename workflow", workflow.name || "Workflow");
+      if (!nextName) return;
+      workflow.name = nextName.trim() || workflow.name;
+      await saveWorkflows();
+      renderWorkflowsList();
+      showStatus("✅ Workflow renamed");
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "workflowActionBtn";
+    deleteBtn.type = "button";
+    deleteBtn.innerHTML = `<span class="material-icons" aria-hidden="true">close</span>`;
+    deleteBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      workflows = workflows.filter((itemWorkflow) => itemWorkflow.id !== workflow.id);
+      await saveWorkflows();
+      renderWorkflowsList();
+      showStatus("🗑️ Workflow deleted");
+    });
+
+    actions.appendChild(jsonBtn);
+    actions.appendChild(renameBtn);
+    actions.appendChild(deleteBtn);
+
+    item.appendChild(name);
+    item.appendChild(actions);
+
+    item.addEventListener("click", async () => {
+      state.actions = JSON.parse(JSON.stringify(workflow.data?.actions ?? []));
+      if (workflow.data?.settings) {
+        state.settings = JSON.parse(JSON.stringify(workflow.data.settings));
+      }
+      state.workflowName = workflow.name || "Workflow";
+      await saveState();
+      render();
+      closeWorkflows();
+      showStatus("✅ Workflow loaded");
+    });
+
+    workflowsList.appendChild(item);
+  });
 }
 
 function clearDropIndicators() {
@@ -615,6 +825,22 @@ function renderTimelineItem(action, idx, isLast) {
   const headerRight = document.createElement("div");
   headerRight.className = "headerRight";
 
+  const duplicateBtn = document.createElement("button");
+  duplicateBtn.className = "duplicateBtn";
+  duplicateBtn.setAttribute("aria-label", "Duplicate action");
+  duplicateBtn.innerHTML = iconDuplicate();
+
+  duplicateBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const cloned = JSON.parse(JSON.stringify(action));
+    cloned.id = uid();
+    cloned.jsonOpen = false;
+    state.actions.splice(idx + 1, 0, cloned);
+    await saveState();
+    render();
+    showStatus("📄 Action duplicated");
+  });
+
   const del = document.createElement("button");
   del.className = "deleteBtn";
   del.setAttribute("aria-label", "Delete action");
@@ -628,6 +854,7 @@ function renderTimelineItem(action, idx, isLast) {
     showStatus("🗑️ Action deleted");
   });
 
+  headerRight.appendChild(duplicateBtn);
   headerRight.appendChild(del);
 
   header.appendChild(dragHandle);

@@ -40,7 +40,22 @@
 
       <main class="content">
         <section class="actionsSection">
-          <h2>Actions</h2>
+          <div class="actionsHeader">
+            <div class="workflowTitle">
+              <input
+                id="workflowNameInput"
+                class="workflowNameInput"
+                type="text"
+                value="Workflow"
+                readonly
+                title="Click to edit"
+              />
+            </div>
+            <div class="actionsHeaderBtns">
+              <button id="workflowsBtn" class="btn">Workflows</button>
+              <button id="saveWorkflowBtn" class="btn primary">Save</button>
+            </div>
+          </div>
           <div id="actionsList" class="actionsList"></div>
         </section>
       </main>
@@ -190,6 +205,41 @@
 
             <div class="formActions">
               <button id="saveSettingsBtn" class="btn primary">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Workflows Modal -->
+      <div id="workflowsBackdrop" class="backdrop hidden" role="dialog" aria-modal="true">
+        <div class="modal">
+          <div class="modalHeader">
+            <div class="modalTitle">Workflows</div>
+            <button id="closeWorkflowsBtn" class="iconBtn small" aria-label="Close">
+              <span class="material-icons" aria-hidden="true">close</span>
+            </button>
+          </div>
+
+          <div class="modalBody">
+            <div id="workflowsList" class="workflowsList"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Workflow JSON Modal -->
+      <div id="workflowJsonBackdrop" class="backdrop hidden" role="dialog" aria-modal="true">
+        <div class="modal modalWide">
+          <div class="modalHeader">
+            <div id="workflowJsonTitle" class="modalTitle">Workflow JSON</div>
+            <button id="closeWorkflowJsonBtn" class="iconBtn small" aria-label="Close">
+              <span class="material-icons" aria-hidden="true">close</span>
+            </button>
+          </div>
+          <div class="modalBody">
+            <div id="workflowJsonText" class="jsonBox workflowJsonBox"></div>
+            <div class="formActions">
+              <button id="copyWorkflowJsonBtn" class="btn">Copy JSON</button>
+              <button id="backToWorkflowsBtn" class="btn primary">Back to list</button>
             </div>
           </div>
         </div>
