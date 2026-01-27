@@ -13,6 +13,7 @@ const addReloadTabNode = document.getElementById("addReloadTabNode");
 const addSimpleLoopNode = document.getElementById("addSimpleLoopNode");
 const addClipboardNode = document.getElementById("addClipboardNode");
 const addKeyboardNode = document.getElementById("addKeyboardNode");
+const addSheetsCheckValueNode = document.getElementById("addSheetsCheckValueNode");
 
 const settingsBackdrop = document.getElementById("settingsBackdrop");
 const closeSettingsBtn = document.getElementById("closeSettingsBtn");
@@ -47,7 +48,7 @@ let state = {
   },
   actions: []
   // action:
-  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"clipboard"|"keyboard", collapsed: true, jsonOpen: false }
+  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"clipboard"|"keyboard"|"sheetsCheckValue", collapsed: true, jsonOpen: false }
 };
 
 let runState = {
@@ -114,6 +115,10 @@ async function loadState() {
       }
       if (!Number.isFinite(a.pressCount) || a.pressCount < 1) a.pressCount = 1;
       if (!Number.isFinite(a.delaySec) || a.delaySec < 0) a.delaySec = 1;
+    }
+    if (a.type === "sheetsCheckValue") {
+      if (typeof a.expectedValue !== "string") a.expectedValue = "";
+      if (typeof a.cellRef !== "string") a.cellRef = "";
     }
   }
 
@@ -325,6 +330,22 @@ addKeyboardNode.addEventListener("click", async () => {
   showStatus("✅ Keyboard node added");
 });
 
+addSheetsCheckValueNode.addEventListener("click", async () => {
+  const action = {
+    id: uid(),
+    type: "sheetsCheckValue",
+    collapsed: true,
+    jsonOpen: false,
+    expectedValue: "",
+    cellRef: ""
+  };
+  state.actions.push(action);
+  await saveState();
+  render();
+  closeModal();
+  showStatus("✅ Sheets Check Value node added");
+});
+
 playBtn.addEventListener("click", async () => {
   if (runState.status === "running") {
     await chrome.runtime.sendMessage({ type: "PAUSE_FLOW" });
@@ -449,6 +470,13 @@ function buildJsonForAction(action) {
       delaySec: Number.isFinite(action.delaySec) ? Math.max(0, action.delaySec) : 1
     };
   }
+  if (action.type === "sheetsCheckValue") {
+    return {
+      type: "sheetsCheckValue",
+      expectedValue: action.expectedValue ?? "",
+      cellRef: action.cellRef ?? ""
+    };
+  }
   return { type: action.type };
 }
 
@@ -528,6 +556,7 @@ function renderTimelineItem(action, idx, isLast) {
   if (action.type === "simpleLoop") title.textContent = "Simple Loop";
   if (action.type === "clipboard") title.textContent = "Clipboard";
   if (action.type === "keyboard") title.textContent = "Keyboard";
+  if (action.type === "sheetsCheckValue") title.textContent = "Sheets Check Value";
 
   const sub = document.createElement("span");
   sub.className = "headerSub";
@@ -568,6 +597,11 @@ function renderTimelineItem(action, idx, isLast) {
       enter: "Enter"
     }[action.key];
     sub.textContent = `• ${label || "key"} ×${Number(action.pressCount ?? 1)}`;
+  }
+  if (action.type === "sheetsCheckValue") {
+    const cellLabel = action.cellRef ? ` ${action.cellRef}` : " selection";
+    const expectedLabel = action.expectedValue ? ` = "${truncate(action.expectedValue, 18)}"` : "";
+    sub.textContent = `•${cellLabel}${expectedLabel}`;
   }
 
   const headerRight = document.createElement("div");
@@ -901,6 +935,54 @@ function renderTimelineItem(action, idx, isLast) {
     left.appendChild(pressInput);
     left.appendChild(delayLabel);
     left.appendChild(delayInput);
+  }
+
+  if (action.type === "sheetsCheckValue") {
+    const valueLabel = document.createElement("div");
+    valueLabel.className = "pill";
+    valueLabel.textContent = "Expected value";
+
+    const valueInput = document.createElement("input");
+    valueInput.className = "input";
+    valueInput.type = "text";
+    valueInput.placeholder = "Enter text to match";
+    valueInput.style.minWidth = "220px";
+    valueInput.value = action.expectedValue ?? "";
+    valueInput.addEventListener("change", async () => {
+      action.expectedValue = valueInput.value;
+      await saveState();
+      render();
+    });
+
+    const pickBtn = document.createElement("button");
+    pickBtn.className = "btn";
+    pickBtn.textContent = "Capture selected cell";
+
+    pickBtn.addEventListener("click", async () => {
+      const tab = await getActiveTab();
+      if (!tab) {
+        showStatus("⚠️ No active tab to read.");
+        return;
+      }
+      const response = await chrome.tabs.sendMessage(tab.id, { type: "SHEETS_READ_SELECTION" });
+      if (!response?.ok) {
+        showStatus(`⚠️ ${response?.error || "Unable to read selection."}`);
+        return;
+      }
+      action.cellRef = response.cellRef ?? "";
+      await saveState();
+      render();
+      showStatus("✅ Sheets cell captured");
+    });
+
+    const cellPill = document.createElement("div");
+    cellPill.className = "pill";
+    cellPill.textContent = action.cellRef ? `Selected cell: ${action.cellRef}` : "Selected cell: not set";
+
+    left.appendChild(valueLabel);
+    left.appendChild(valueInput);
+    left.appendChild(pickBtn);
+    left.appendChild(cellPill);
   }
 
   const del2 = document.createElement("button");
