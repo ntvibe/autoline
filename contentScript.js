@@ -584,6 +584,52 @@
     return { ok: false, error: "Focused element does not support text input." };
   }
 
+  function isGoogleSheets() {
+    return window.location.hostname === "docs.google.com" && window.location.pathname.includes("/spreadsheets");
+  }
+
+  function findSheetsNameBox() {
+    const selectors = [
+      'input[aria-label="Name box"]',
+      'input[aria-label="Name Box"]',
+      '[aria-label="Name box"] input',
+      '[aria-label="Name Box"] input',
+      ".name-box input"
+    ];
+    for (const selector of selectors) {
+      const el = document.querySelector(selector);
+      if (el) return el;
+    }
+    return null;
+  }
+
+  function findSheetsFormulaInput() {
+    const selectors = [
+      'textarea[aria-label="Formula bar"]',
+      'input[aria-label="Formula bar"]',
+      ".cell-input"
+    ];
+    for (const selector of selectors) {
+      const el = document.querySelector(selector);
+      if (el) return el;
+    }
+    return null;
+  }
+
+  function readSheetsSelection() {
+    if (!isGoogleSheets()) {
+      return { ok: false, error: "This action only works on Google Sheets." };
+    }
+    const nameBox = findSheetsNameBox();
+    const cellRef = (nameBox?.value || nameBox?.textContent || "").trim();
+    const formulaInput = findSheetsFormulaInput();
+    let value = "";
+    if (formulaInput) {
+      value = typeof formulaInput.value === "string" ? formulaInput.value : formulaInput.textContent || "";
+    }
+    return { ok: true, cellRef, value };
+  }
+
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === "ARM_CLICK_RECORD") {
       ensureStyles();
@@ -713,6 +759,11 @@
         const insertResult = insertTextIntoActiveElement(readResult.text ?? "");
         sendResponse(insertResult.ok ? { ok: true, usedFallback: readResult.fallback } : insertResult);
       })();
+      return true;
+    }
+
+    if (msg?.type === "SHEETS_READ_SELECTION") {
+      sendResponse(readSheetsSelection());
       return true;
     }
 

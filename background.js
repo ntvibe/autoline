@@ -332,6 +332,21 @@ async function runFlow(actions, settings, runId) {
         }
       }
 
+      if (step.type === "sheetsCheckValue") {
+        const tab = await getActiveTab();
+        if (!tab) throw new Error("No active tab for Sheets check.");
+        const result = await sendMessageToTab(tab.id, { type: "SHEETS_READ_SELECTION" });
+        if (!result?.ok) throw new Error(result?.error || "Sheets check failed.");
+        const expected = String(step.expectedValue ?? "");
+        const actual = typeof result.value === "string" ? result.value : "";
+        if (step.cellRef && result.cellRef && step.cellRef !== result.cellRef) {
+          throw new Error(`Sheets Check Value expected cell ${step.cellRef} but found ${result.cellRef}.`);
+        }
+        if (actual !== expected) {
+          throw new Error(`Sheets Check Value expected "${expected}" but got "${actual}".`);
+        }
+      }
+
         chrome.runtime.sendMessage({ type: "FLOW_STEP_END", actionId: step.id, index: i });
 
       // Global delay between steps (don’t add extra after last)
