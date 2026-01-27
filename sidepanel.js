@@ -11,6 +11,7 @@ const addOpenUrlNode = document.getElementById("addOpenUrlNode");
 const addClickNode = document.getElementById("addClickNode");
 const addReloadTabNode = document.getElementById("addReloadTabNode");
 const addSimpleLoopNode = document.getElementById("addSimpleLoopNode");
+const addClipboardNode = document.getElementById("addClipboardNode");
 
 const settingsBackdrop = document.getElementById("settingsBackdrop");
 const closeSettingsBtn = document.getElementById("closeSettingsBtn");
@@ -45,7 +46,7 @@ let state = {
   },
   actions: []
   // action:
-  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop", collapsed: true, jsonOpen: false }
+  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"clipboard", collapsed: true, jsonOpen: false }
 };
 
 let runState = {
@@ -103,6 +104,9 @@ async function loadState() {
       if (typeof a.showClickDot !== "boolean") a.showClickDot = true;
     }
     if (a.type === "simpleLoop" && typeof a.enabled !== "boolean") a.enabled = true;
+    if (a.type === "clipboard" && !["copy", "paste"].includes(a.mode)) {
+      a.mode = "copy";
+    }
   }
 
   render();
@@ -287,6 +291,15 @@ addSimpleLoopNode.addEventListener("click", async () => {
   showStatus("✅ Simple Loop node added");
 });
 
+addClipboardNode.addEventListener("click", async () => {
+  const action = { id: uid(), type: "clipboard", collapsed: true, jsonOpen: false, mode: "copy" };
+  state.actions.push(action);
+  await saveState();
+  render();
+  closeModal();
+  showStatus("✅ Clipboard node added");
+});
+
 playBtn.addEventListener("click", async () => {
   if (runState.status === "running") {
     await chrome.runtime.sendMessage({ type: "PAUSE_FLOW" });
@@ -400,6 +413,9 @@ function buildJsonForAction(action) {
   if (action.type === "simpleLoop") {
     return { type: "simpleLoop", enabled: action.enabled ?? true };
   }
+  if (action.type === "clipboard") {
+    return { type: "clipboard", mode: action.mode ?? "copy" };
+  }
   return { type: action.type };
 }
 
@@ -477,6 +493,7 @@ function renderTimelineItem(action, idx, isLast) {
   if (action.type === "click") title.textContent = "Click";
   if (action.type === "reloadTab") title.textContent = "Reload Tab";
   if (action.type === "simpleLoop") title.textContent = "Simple Loop";
+  if (action.type === "clipboard") title.textContent = "Clipboard";
 
   const sub = document.createElement("span");
   sub.className = "headerSub";
@@ -501,6 +518,9 @@ function renderTimelineItem(action, idx, isLast) {
   }
   if (action.type === "simpleLoop") {
     sub.textContent = action.enabled ? "• enabled" : "• disabled";
+  }
+  if (action.type === "clipboard") {
+    sub.textContent = action.mode === "paste" ? "• paste clipboard" : "• copy selection";
   }
 
   const headerRight = document.createElement("div");
@@ -735,6 +755,29 @@ function renderTimelineItem(action, idx, isLast) {
 
     left.appendChild(label);
     left.appendChild(toggle);
+  }
+
+  if (action.type === "clipboard") {
+    const label = document.createElement("div");
+    label.className = "pill";
+    label.textContent = "Clipboard action";
+
+    const select = document.createElement("select");
+    select.className = "select";
+    select.style.minWidth = "160px";
+    select.innerHTML = `
+      <option value="copy">Copy selection</option>
+      <option value="paste">Paste clipboard</option>
+    `;
+    select.value = action.mode ?? "copy";
+    select.addEventListener("change", async () => {
+      action.mode = select.value === "paste" ? "paste" : "copy";
+      await saveState();
+      render();
+    });
+
+    left.appendChild(label);
+    left.appendChild(select);
   }
 
   const del2 = document.createElement("button");
