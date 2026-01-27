@@ -315,24 +315,22 @@ async function runFlow(actions, settings, runId) {
       if (step.type === "clipboard") {
         const tab = await getActiveTab();
         if (!tab) throw new Error("No active tab for clipboard action.");
-        await ensureDebuggerLock(tab.id, "flow");
         const mode = step.mode === "paste" ? "paste" : "copy";
-        const info = await getPlatformInfo();
-        const modifierSpec = getModifierKeySpec(info.os);
-        const keySpecBase = {
-          key: mode === "copy" ? "c" : "v",
-          code: mode === "copy" ? "KeyC" : "KeyV",
-          windowsVirtualKeyCode: mode === "copy" ? 67 : 86
-        };
-        if (mode === "copy") {
-          await dispatchModifierShortcut(tab.id, modifierSpec, keySpecBase);
-        } else {
-          await dispatchModifierShortcut(tab.id, modifierSpec, keySpecBase);
+        let clipboardResult = await performClipboardAction(tab.id, mode);
+        let usedCdp = false;
+        if (!clipboardResult?.ok) {
+          await ensureDebuggerLock(tab.id, "flow");
+          await performClipboardActionCdp(tab.id, mode);
+          usedCdp = true;
+          clipboardResult = { ok: true, source: "cdp" };
         }
 
-        let source = "keyboard";
+        let source = clipboardResult.source || (usedCdp ? "cdp" : "selection");
         let cellRef = "";
-        if (mode === "copy" && isSheetsUrl(tab.url)) {
+        if (typeof clipboardResult.cellRef === "string") {
+          cellRef = clipboardResult.cellRef;
+        }
+        if (mode === "copy" && isSheetsUrl(tab.url) && source !== "sheets") {
           try {
             const sheetsResult = await readSheetsSelectionViaDebugger(tab.id);
             if (sheetsResult?.ok) {
@@ -588,11 +586,30 @@ async function realClick(tabId, x, y, count = 1) {
 
 function dispatchKey(tabId, keySpec, type) {
   return new Promise((resolve, reject) => {
+    const attached = attachedDebugTabs.has(tabId);
+    console.log("[dispatchKey] Input.dispatchKeyEvent start", {
+      tabId,
+      type,
+      key: keySpec?.key,
+      code: keySpec?.code,
+      attached
+    });
     chrome.debugger.sendCommand({ tabId }, "Input.dispatchKeyEvent", { type, ...keySpec }, () => {
       if (chrome.runtime.lastError) {
+        console.log("[dispatchKey] Input.dispatchKeyEvent error", {
+          tabId,
+          type,
+          attached,
+          error: chrome.runtime.lastError.message
+        });
         reject(new Error(chrome.runtime.lastError.message));
         return;
       }
+      console.log("[dispatchKey] Input.dispatchKeyEvent success", {
+        tabId,
+        type,
+        attached
+      });
       resolve();
     });
   });
@@ -632,6 +649,24 @@ function sendDebuggerCommand(tabId, method, params) {
       resolve(result);
     });
   });
+}
+
+async function performClipboardAction(tabId, mode) {
+  if (mode === "paste") {
+    return sendMessageToTab(tabId, { type: "CLIPBOARD_PASTE" });
+  }
+  return sendMessageToTab(tabId, { type: "CLIPBOARD_COPY_SELECTION" });
+}
+
+async function performClipboardActionCdp(tabId, mode) {
+  const info = await getPlatformInfo();
+  const modifierSpec = getModifierKeySpec(info.os);
+  const keySpecBase = {
+    key: mode === "copy" ? "c" : "v",
+    code: mode === "copy" ? "KeyC" : "KeyV",
+    windowsVirtualKeyCode: mode === "copy" ? 67 : 86
+  };
+  await dispatchModifierShortcut(tabId, modifierSpec, keySpecBase);
 }
 
 function getPlatformInfo() {
