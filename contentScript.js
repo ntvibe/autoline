@@ -521,6 +521,69 @@
     pointerState.visible = false;
   }
 
+  async function copySelectionToClipboard() {
+    const selection = window.getSelection();
+    const text = selection ? selection.toString() : "";
+    try {
+      await navigator.clipboard.writeText(text);
+      return { ok: true, text };
+    } catch (e) {
+      return { ok: false, text, error: e?.message || "Clipboard write failed" };
+    }
+  }
+
+  async function readClipboardText(fallbackText) {
+    try {
+      const text = await navigator.clipboard.readText();
+      return { ok: true, text };
+    } catch (e) {
+      if (typeof fallbackText === "string") {
+        return { ok: true, text: fallbackText, fallback: true };
+      }
+      return { ok: false, error: e?.message || "Clipboard read failed" };
+    }
+  }
+
+  function insertTextIntoActiveElement(text) {
+    const active = document.activeElement;
+    if (!active) return { ok: false, error: "No focused element to paste into." };
+    active.focus();
+
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+      const start = Number.isFinite(active.selectionStart) ? active.selectionStart : active.value.length;
+      const end = Number.isFinite(active.selectionEnd) ? active.selectionEnd : active.value.length;
+      if (typeof active.setRangeText === "function") {
+        active.setRangeText(text, start, end, "end");
+      } else {
+        const before = active.value.slice(0, start);
+        const after = active.value.slice(end);
+        active.value = `${before}${text}${after}`;
+        const pos = start + text.length;
+        active.selectionStart = pos;
+        active.selectionEnd = pos;
+      }
+      active.dispatchEvent(new Event("input", { bubbles: true }));
+      return { ok: true };
+    }
+
+    if (active.isContentEditable) {
+      const success = document.execCommand("insertText", false, text);
+      if (!success) {
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          selection.deleteFromDocument();
+          selection.getRangeAt(0).insertNode(document.createTextNode(text));
+        } else {
+          active.textContent += text;
+        }
+      }
+      active.dispatchEvent(new Event("input", { bubbles: true }));
+      return { ok: true };
+    }
+
+    return { ok: false, error: "Focused element does not support text input." };
+  }
+
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === "ARM_CLICK_RECORD") {
       ensureStyles();
@@ -629,6 +692,27 @@
         showClickIndicator(msg.x, msg.y);
       }
       sendResponse({ ok: true });
+      return true;
+    }
+
+    if (msg?.type === "CLIPBOARD_COPY_SELECTION") {
+      (async () => {
+        const result = await copySelectionToClipboard();
+        sendResponse(result);
+      })();
+      return true;
+    }
+
+    if (msg?.type === "CLIPBOARD_PASTE") {
+      (async () => {
+        const readResult = await readClipboardText(msg.fallbackText);
+        if (!readResult.ok) {
+          sendResponse(readResult);
+          return;
+        }
+        const insertResult = insertTextIntoActiveElement(readResult.text ?? "");
+        sendResponse(insertResult.ok ? { ok: true, usedFallback: readResult.fallback } : insertResult);
+      })();
       return true;
     }
 

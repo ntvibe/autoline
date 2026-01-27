@@ -4,6 +4,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chunkDelay = 150;
 const urlSchemeRegex = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 const attachedDebugTabs = new Set();
+let clipboardCache = "";
 
 // Open side panel on icon click
 chrome.runtime.onInstalled.addListener(async () => {
@@ -244,6 +245,27 @@ async function runFlow(actions, settings, runId) {
 
       if (step.type === "simpleLoop") {
         await sleepWithPause(0, runId);
+      }
+
+      if (step.type === "clipboard") {
+        const tab = await getActiveTab();
+        if (!tab) throw new Error("No active tab for clipboard action.");
+        const mode = step.mode === "paste" ? "paste" : "copy";
+        if (mode === "copy") {
+          const result = await sendMessageToTab(tab.id, { type: "CLIPBOARD_COPY_SELECTION" });
+          if (!result?.ok) {
+            throw new Error(result?.error || "Clipboard copy failed.");
+          }
+          clipboardCache = typeof result.text === "string" ? result.text : "";
+        } else {
+          const result = await sendMessageToTab(tab.id, {
+            type: "CLIPBOARD_PASTE",
+            fallbackText: clipboardCache
+          });
+          if (!result?.ok) {
+            throw new Error(result?.error || "Clipboard paste failed.");
+          }
+        }
       }
 
       chrome.runtime.sendMessage({ type: "FLOW_STEP_END", actionId: step.id, index: i });
