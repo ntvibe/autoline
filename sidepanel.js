@@ -54,7 +54,8 @@ let state = {
 let runState = {
   status: "idle",
   currentId: null,
-  doneIds: new Set()
+  doneIds: new Set(),
+  checkResults: new Map()
 };
 
 function uid() {
@@ -119,6 +120,8 @@ async function loadState() {
     if (a.type === "sheetsCheckValue") {
       if (typeof a.expectedValue !== "string") a.expectedValue = "";
       if (typeof a.cellRef !== "string") a.cellRef = "";
+      if (typeof a.lastReadCellRef !== "string") a.lastReadCellRef = "";
+      if (typeof a.lastReadValue !== "string") a.lastReadValue = "";
     }
   }
 
@@ -514,6 +517,11 @@ function renderTimelineItem(action, idx, isLast) {
   if (runState.status === "running" && runState.currentId === action.id) tItem.classList.add("running");
   if (runState.status === "paused" && runState.currentId === action.id) tItem.classList.add("paused");
   if (runState.doneIds.has(action.id)) tItem.classList.add("done");
+  if (action.type === "sheetsCheckValue") {
+    const checkResult = runState.checkResults.get(action.id);
+    if (checkResult?.matched === true) tItem.classList.add("check-pass");
+    if (checkResult?.matched === false) tItem.classList.add("check-fail");
+  }
 
   const rail = document.createElement("div");
   rail.className = "tRail";
@@ -964,12 +972,17 @@ function renderTimelineItem(action, idx, isLast) {
         showStatus("⚠️ No active tab to read.");
         return;
       }
-      const response = await chrome.tabs.sendMessage(tab.id, { type: "SHEETS_READ_SELECTION" });
+      const response = await chrome.runtime.sendMessage({
+        type: "SHEETS_READ_SELECTION_DEBUG",
+        tabId: tab.id
+      });
       if (!response?.ok) {
         showStatus(`⚠️ ${response?.error || "Unable to read selection."}`);
         return;
       }
       action.cellRef = response.cellRef ?? "";
+      action.lastReadCellRef = response.cellRef ?? "";
+      action.lastReadValue = response.value ?? "";
       await saveState();
       render();
       showStatus("✅ Sheets cell captured");
@@ -979,10 +992,21 @@ function renderTimelineItem(action, idx, isLast) {
     cellPill.className = "pill";
     cellPill.textContent = action.cellRef ? `Selected cell: ${action.cellRef}` : "Selected cell: not set";
 
+    const readPill = document.createElement("div");
+    readPill.className = "pill";
+    if (action.lastReadCellRef || action.lastReadValue) {
+      const cell = action.lastReadCellRef ? action.lastReadCellRef : "selection";
+      const value = action.lastReadValue !== "" ? `"${truncate(action.lastReadValue, 22)}"` : "(empty)";
+      readPill.textContent = `Last read: ${cell} = ${value}`;
+    } else {
+      readPill.textContent = "Last read: not captured";
+    }
+
     left.appendChild(valueLabel);
     left.appendChild(valueInput);
     left.appendChild(pickBtn);
     left.appendChild(cellPill);
+    left.appendChild(readPill);
   }
 
   const del2 = document.createElement("button");
@@ -1124,6 +1148,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     runState.status = "running";
     runState.currentId = null;
     runState.doneIds = new Set();
+    runState.checkResults = new Map();
     render();
   }
 
@@ -1168,6 +1193,24 @@ chrome.runtime.onMessage.addListener((msg) => {
     runState.currentId = null;
     render();
     showStatus("❌ Flow error: " + msg.error, 3500);
+  }
+
+  if (msg?.type === "SHEETS_CHECK_RESULT") {
+    if (msg.actionId) {
+      const action = state.actions.find((item) => item.id === msg.actionId);
+      if (action) {
+        action.lastReadCellRef = msg.cellRef ?? "";
+        action.lastReadValue = msg.actual ?? "";
+        saveState();
+      }
+      runState.checkResults.set(msg.actionId, {
+        matched: msg.matched,
+        cellRef: msg.cellRef,
+        expected: msg.expected,
+        actual: msg.actual
+      });
+      render();
+    }
   }
 });
 
