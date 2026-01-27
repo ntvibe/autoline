@@ -319,22 +319,32 @@ async function runFlow(actions, settings, runId) {
         const mode = step.mode === "paste" ? "paste" : "copy";
         const info = await getPlatformInfo();
         const modifiers = getShortcutModifier(info.os);
-        const contentResponse = await sendMessageToTab(tab.id, {
-          type: mode === "copy" ? "CLIPBOARD_COPY_SELECTION" : "CLIPBOARD_PASTE"
-        });
-        if (contentResponse?.ok) {
-          chrome.runtime.sendMessage({
-            type: "FLOW_CLIPBOARD_RESULT",
-            actionId: step.id,
-            mode,
-            source: contentResponse.source,
-            cellRef: contentResponse.cellRef
-          });
-        } else if (mode === "copy") {
+        if (mode === "copy") {
           await dispatchShortcut(tab.id, { key: "c", code: "KeyC", windowsVirtualKeyCode: 67, modifiers });
         } else {
           await dispatchShortcut(tab.id, { key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers });
         }
+
+        let source = "keyboard";
+        let cellRef = "";
+        if (mode === "copy" && isSheetsUrl(tab.url)) {
+          try {
+            const sheetsResult = await readSheetsSelectionViaDebugger(tab.id);
+            if (sheetsResult?.ok) {
+              source = "sheets";
+              cellRef = sheetsResult.cellRef || "";
+            }
+          } catch (e) {
+          }
+        }
+
+        chrome.runtime.sendMessage({
+          type: "FLOW_CLIPBOARD_RESULT",
+          actionId: step.id,
+          mode,
+          source,
+          cellRef
+        });
       }
 
       if (step.type === "keyboard") {
@@ -611,6 +621,16 @@ function getPlatformInfo() {
 
 function getShortcutModifier(os) {
   return os === "mac" ? 4 : 2;
+}
+
+function isSheetsUrl(url) {
+  if (typeof url !== "string") return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname === "docs.google.com" && parsed.pathname.includes("/spreadsheets");
+  } catch (e) {
+    return false;
+  }
 }
 
 async function getKeySpec(key) {
