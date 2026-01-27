@@ -5,7 +5,7 @@ const chunkDelay = 150;
 const urlSchemeRegex = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 const attachedDebugTabs = new Set();
 const debugLocks = new Map();
-let clipboardCache = "";
+let platformInfoPromise = null;
 
 // Open side panel on icon click
 chrome.runtime.onInstalled.addListener(async () => {
@@ -129,6 +129,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       await releaseDebuggerLock(tabId, msg.reason || "manual");
       sendResponse({ ok: true });
+      return;
+    }
+
+    if (msg?.type === "SHEETS_READ_SELECTION_DEBUG") {
+      const tabId = msg.tabId ?? sender?.tab?.id;
+      if (typeof tabId !== "number") {
+        sendResponse({ ok: false, error: "Missing tabId." });
+        return;
+      }
+      await ensureDebuggerLock(tabId, "read");
+      try {
+        const result = await readSheetsSelectionViaDebugger(tabId);
+        sendResponse(result);
+      } catch (e) {
+        sendResponse({ ok: false, error: e?.message || "Sheets check failed." });
+      } finally {
+        await releaseDebuggerLock(tabId, "read");
+      }
       return;
     }
 
@@ -297,21 +315,14 @@ async function runFlow(actions, settings, runId) {
       if (step.type === "clipboard") {
         const tab = await getActiveTab();
         if (!tab) throw new Error("No active tab for clipboard action.");
+        await ensureDebuggerLock(tab.id, "flow");
         const mode = step.mode === "paste" ? "paste" : "copy";
+        const info = await getPlatformInfo();
+        const modifiers = getShortcutModifier(info.os);
         if (mode === "copy") {
-          const result = await sendMessageToTab(tab.id, { type: "CLIPBOARD_COPY_SELECTION" });
-          if (!result?.ok) {
-            throw new Error(result?.error || "Clipboard copy failed.");
-          }
-          clipboardCache = typeof result.text === "string" ? result.text : "";
+          await dispatchShortcut(tab.id, { key: "c", code: "KeyC", windowsVirtualKeyCode: 67, modifiers });
         } else {
-          const result = await sendMessageToTab(tab.id, {
-            type: "CLIPBOARD_PASTE",
-            fallbackText: clipboardCache
-          });
-          if (!result?.ok) {
-            throw new Error(result?.error || "Clipboard paste failed.");
-          }
+          await dispatchShortcut(tab.id, { key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers });
         }
       }
 
@@ -319,13 +330,17 @@ async function runFlow(actions, settings, runId) {
         const tab = await getActiveTab();
         if (!tab) throw new Error("No active tab for keyboard action.");
         await ensureDebuggerLock(tab.id, "flow");
-        const keySpec = getKeySpec(step.key);
+        const keySpec = await getKeySpec(step.key);
         if (!keySpec) throw new Error("Keyboard node missing a key selection.");
         const pressCount = Math.max(1, Math.round(Number(step.pressCount) || 1));
         const delayMs = Math.max(0, Number(step.delaySec ?? 1)) * 1000;
         for (let press = 0; press < pressCount; press += 1) {
-          await dispatchKey(tab.id, keySpec, "keyDown");
-          await dispatchKey(tab.id, keySpec, "keyUp");
+          if (keySpec.modifiers) {
+            await dispatchShortcut(tab.id, keySpec);
+          } else {
+            await dispatchKey(tab.id, keySpec, "keyDown");
+            await dispatchKey(tab.id, keySpec, "keyUp");
+          }
           if (press < pressCount - 1 && delayMs > 0) {
             await sleepWithPause(delayMs, runId);
           }
@@ -335,12 +350,24 @@ async function runFlow(actions, settings, runId) {
       if (step.type === "sheetsCheckValue") {
         const tab = await getActiveTab();
         if (!tab) throw new Error("No active tab for Sheets check.");
-        const result = await sendMessageToTab(tab.id, { type: "SHEETS_READ_SELECTION" });
+        await ensureDebuggerLock(tab.id, "flow");
+        const result = await readSheetsSelectionViaDebugger(tab.id);
         if (!result?.ok) throw new Error(result?.error || "Sheets check failed.");
         const expected = String(step.expectedValue ?? "");
         const actual = typeof result.value === "string" ? result.value : "";
-        if (step.cellRef && result.cellRef && step.cellRef !== result.cellRef) {
-          throw new Error(`Sheets Check Value expected cell ${step.cellRef} but found ${result.cellRef}.`);
+        const cellRef = typeof result.cellRef === "string" ? result.cellRef : "";
+        const matchesCell = step.cellRef ? step.cellRef === cellRef : true;
+        const matched = matchesCell && actual === expected;
+        chrome.runtime.sendMessage({
+          type: "SHEETS_CHECK_RESULT",
+          actionId: step.id,
+          matched,
+          cellRef,
+          expected,
+          actual
+        });
+        if (!matchesCell && step.cellRef) {
+          throw new Error(`Sheets Check Value expected cell ${step.cellRef} but found ${cellRef || "(none)"}.`);
         }
         if (actual !== expected) {
           throw new Error(`Sheets Check Value expected "${expected}" but got "${actual}".`);
@@ -545,15 +572,47 @@ function dispatchKey(tabId, keySpec, type) {
   });
 }
 
-function getKeySpec(key) {
+async function dispatchShortcut(tabId, keySpec) {
+  await dispatchKey(tabId, keySpec, "keyDown");
+  await dispatchKey(tabId, keySpec, "keyUp");
+}
+
+function sendDebuggerCommand(tabId, method, params) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand({ tabId }, method, params, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(result);
+    });
+  });
+}
+
+function getPlatformInfo() {
+  if (!platformInfoPromise) {
+    platformInfoPromise = new Promise((resolve) => {
+      chrome.runtime.getPlatformInfo((info) => resolve(info || { os: "unknown" }));
+    });
+  }
+  return platformInfoPromise;
+}
+
+function getShortcutModifier(os) {
+  return os === "mac" ? 4 : 2;
+}
+
+async function getKeySpec(key) {
   switch (key) {
-    case "ctrlA":
+    case "ctrlA": {
+      const info = await getPlatformInfo();
       return {
         key: "a",
         code: "KeyA",
         windowsVirtualKeyCode: 65,
-        modifiers: 2
+        modifiers: getShortcutModifier(info.os)
       };
+    }
     case "delete":
       return { key: "Delete", code: "Delete", windowsVirtualKeyCode: 46 };
     case "backspace":
@@ -571,4 +630,42 @@ function getKeySpec(key) {
     default:
       return null;
   }
+}
+
+async function readSheetsSelectionViaDebugger(tabId) {
+  const expression = `(() => {
+    const isSheets = location.hostname === "docs.google.com" && location.pathname.includes("/spreadsheets");
+    if (!isSheets) {
+      return { ok: false, error: "This action only works on Google Sheets." };
+    }
+    const nameSelectors = [
+      'input[aria-label="Name box"]',
+      'input[aria-label="Name Box"]',
+      '[aria-label="Name box"] input',
+      '[aria-label="Name Box"] input',
+      ".name-box input"
+    ];
+    const formulaSelectors = [
+      'textarea[aria-label="Formula bar"]',
+      'input[aria-label="Formula bar"]',
+      ".cell-input"
+    ];
+    const findFirst = (selectors) => {
+      for (const selector of selectors) {
+        const el = document.querySelector(selector);
+        if (el) return el;
+      }
+      return null;
+    };
+    const nameBox = findFirst(nameSelectors);
+    const formulaInput = findFirst(formulaSelectors);
+    const cellRef = (nameBox && (nameBox.value || nameBox.textContent) || "").trim();
+    const value = formulaInput ? (typeof formulaInput.value === "string" ? formulaInput.value : (formulaInput.textContent || "")) : "";
+    return { ok: true, cellRef, value };
+  })()`;
+  const result = await sendDebuggerCommand(tabId, "Runtime.evaluate", {
+    expression,
+    returnByValue: true
+  });
+  return result?.result?.value ?? { ok: false, error: "Sheets check failed." };
 }
