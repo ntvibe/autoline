@@ -131,7 +131,7 @@
 
           <div class="modalBody">
             <div class="formRow">
-              <label class="label">Delay between actions (sec)</label>
+              <label class="label">Actions delay</label>
               <input id="globalDelayInput" class="input" type="number" step="0.1" min="0" />
               <div class="hint">Default: 1 sec</div>
             </div>
@@ -147,10 +147,16 @@
             </div>
 
             <div class="pointerSection">
-              <div class="pointerSectionTitle">Pointer settings</div>
+              <div class="pointerSectionTitle">Mouse Pointer</div>
               <div id="pointerPreview" class="pointerPreview" aria-hidden="true">
                 <div class="pointerPreviewText">
-                  Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor.
+                  “Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut
+                  labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris
+                  nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit
+                  esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt
+                  in culpa qui officia deserunt mollit anim id est laborum. Curabitur pretium tincidunt lacus, nulla
+                  gravida orci a odio. Nullam varius, turpis et commodo pharetra, est eros bibendum elit, nec luctus
+                  magna felis sollicitudin mauris. Integer in mauris eu nibh euismod gravida.”
                 </div>
                 <div id="pointerPreviewPointer" class="pointerPreviewPointer">
                   <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -164,27 +170,27 @@
 
               <div class="pointerControls">
                 <div class="formRow">
-                  <label class="label" for="pointerSizeInput">Mouse pointer size (px)</label>
+                  <label class="label" for="pointerSizeInput">Size (px)</label>
                   <input id="pointerSizeInput" class="input" type="number" min="8" step="1" />
                 </div>
 
                 <div class="formRow">
-                  <label class="label" for="pointerFillInput">Mouse pointer fill</label>
-                  <input id="pointerFillInput" class="input" type="color" />
-                </div>
-
-                <div class="formRow">
-                  <label class="label" for="pointerOutlineInput">Outline thickness (px)</label>
+                  <label class="label" for="pointerOutlineInput">Outline thickness</label>
                   <input id="pointerOutlineInput" class="input" type="number" min="0" step="0.5" />
                 </div>
 
                 <div class="formRow">
-                  <label class="label" for="pointerOutlineColorInput">Outline color</label>
-                  <input id="pointerOutlineColorInput" class="input" type="color" />
+                  <label class="label" for="pointerFillInput">Fill</label>
+                  <input id="pointerFillInput" class="input" type="color" />
                 </div>
 
                 <div class="formRow">
-                  <label class="label" for="pointerShadowToggle">Pointer shadow</label>
+                  <label class="label" for="pointerOutlineColorInput">Outline</label>
+                  <input id="pointerOutlineColorInput" class="input" type="color" />
+                </div>
+
+                <div class="formRow spanTwo">
+                  <label class="label" for="pointerShadowToggle">Shadow</label>
                   <label class="toggleRow">
                     <input id="pointerShadowToggle" type="checkbox" />
                     <span>Enabled</span>
@@ -192,13 +198,13 @@
                 </div>
 
                 <div class="formRow">
-                  <label class="label" for="pointerShadowOpacityInput">Shadow transparency (%)</label>
-                  <input id="pointerShadowOpacityInput" class="input" type="number" min="0" max="100" step="1" />
+                  <label class="label" for="pointerShadowBlurInput">Blur</label>
+                  <input id="pointerShadowBlurInput" class="input" type="number" min="0" step="1" />
                 </div>
 
                 <div class="formRow">
-                  <label class="label" for="pointerShadowBlurInput">Shadow blur (px)</label>
-                  <input id="pointerShadowBlurInput" class="input" type="number" min="0" step="1" />
+                  <label class="label" for="pointerShadowOpacityInput">Transparency</label>
+                  <input id="pointerShadowOpacityInput" class="input" type="number" min="0" max="100" step="1" />
                 </div>
               </div>
             </div>
