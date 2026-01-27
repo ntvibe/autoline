@@ -720,6 +720,24 @@ async function getKeySpec(key) {
         modifiers: getShortcutModifier(info.os)
       };
     }
+    case "ctrlC": {
+      const info = await getPlatformInfo();
+      return {
+        key: "c",
+        code: "KeyC",
+        windowsVirtualKeyCode: 67,
+        modifiers: getShortcutModifier(info.os)
+      };
+    }
+    case "ctrlV": {
+      const info = await getPlatformInfo();
+      return {
+        key: "v",
+        code: "KeyV",
+        windowsVirtualKeyCode: 86,
+        modifiers: getShortcutModifier(info.os)
+      };
+    }
     case "delete":
       return { key: "Delete", code: "Delete", windowsVirtualKeyCode: 46 };
     case "backspace":
@@ -734,6 +752,8 @@ async function getKeySpec(key) {
       return { key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 };
     case "enter":
       return { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 };
+    case "escape":
+      return { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 };
     default:
       return null;
   }
