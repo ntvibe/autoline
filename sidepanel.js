@@ -131,7 +131,21 @@ async function loadState() {
       a.mode = "copy";
     }
     if (a.type === "keyboard") {
-      if (!["ctrlA", "delete", "backspace", "arrowUp", "arrowDown", "arrowLeft", "arrowRight", "enter"].includes(a.key)) {
+      if (
+        ![
+          "ctrlA",
+          "ctrlC",
+          "ctrlV",
+          "delete",
+          "backspace",
+          "arrowUp",
+          "arrowDown",
+          "arrowLeft",
+          "arrowRight",
+          "enter",
+          "escape"
+        ].includes(a.key)
+      ) {
         a.key = "ctrlA";
       }
       if (!Number.isFinite(a.pressCount) || a.pressCount < 1) a.pressCount = 1;
@@ -810,13 +824,16 @@ function renderTimelineItem(action, idx, isLast) {
   if (action.type === "keyboard") {
     const label = {
       ctrlA: "Ctrl+A",
+      ctrlC: "Ctrl+C",
+      ctrlV: "Ctrl+V",
       delete: "Delete",
       backspace: "Backspace",
       arrowUp: "Arrow Up",
       arrowDown: "Arrow Down",
       arrowLeft: "Arrow Left",
       arrowRight: "Arrow Right",
-      enter: "Enter"
+      enter: "Enter",
+      escape: "Esc"
     }[action.key];
     sub.textContent = `• ${label || "key"} ×${Number(action.pressCount ?? 1)}`;
   }
@@ -1117,6 +1134,8 @@ function renderTimelineItem(action, idx, isLast) {
     keySelect.style.minWidth = "180px";
     keySelect.innerHTML = `
       <option value="ctrlA">Ctrl + A (Select all)</option>
+      <option value="ctrlC">Ctrl + C (Copy)</option>
+      <option value="ctrlV">Ctrl + V (Paste)</option>
       <option value="delete">Delete</option>
       <option value="backspace">Backspace</option>
       <option value="arrowUp">Arrow Up</option>
@@ -1124,6 +1143,7 @@ function renderTimelineItem(action, idx, isLast) {
       <option value="arrowLeft">Arrow Left</option>
       <option value="arrowRight">Arrow Right</option>
       <option value="enter">Enter</option>
+      <option value="escape">Esc</option>
     `;
     keySelect.value = action.key ?? "ctrlA";
     keySelect.addEventListener("change", async () => {
