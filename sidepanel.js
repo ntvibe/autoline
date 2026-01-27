@@ -209,11 +209,15 @@ function updatePointerPreviewFromInputs() {
   const svg = pointerPreviewPointer.querySelector("svg");
   const path = svg?.querySelector("path");
   const containerSize = Math.min(pointerPreview.clientWidth || 160, pointerPreview.clientHeight || 120);
-  const maxSize = Math.max(16, containerSize - 32);
+  const padding = Math.max(2, Math.ceil(settings.pointerOutlinePx / 2) + 1);
+  const shadowMargin = settings.pointerShadowEnabled ? Math.ceil(settings.pointerShadowBlur) : 0;
+  const maxSize = Math.max(16, containerSize - 32 - (padding + shadowMargin) * 2);
   const size = Math.min(settings.pointerSizePx, maxSize);
 
   pointerPreviewPointer.style.width = `${size}px`;
   pointerPreviewPointer.style.height = `${size}px`;
+  pointerPreviewPointer.style.padding = `${padding}px`;
+  pointerPreviewPointer.style.boxSizing = "content-box";
 
   if (path) {
     path.setAttribute("fill", settings.pointerFill);
