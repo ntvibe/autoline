@@ -11,6 +11,7 @@ const addOpenUrlNode = document.getElementById("addOpenUrlNode");
 const addClickNode = document.getElementById("addClickNode");
 const addReloadTabNode = document.getElementById("addReloadTabNode");
 const addSimpleLoopNode = document.getElementById("addSimpleLoopNode");
+const addTextBlocksNode = document.getElementById("addTextBlocksNode");
 const addClipboardNode = document.getElementById("addClipboardNode");
 const addKeyboardNode = document.getElementById("addKeyboardNode");
 const addSheetsCheckValueNode = document.getElementById("addSheetsCheckValueNode");
@@ -62,7 +63,7 @@ let state = {
   actions: [],
   workflowName: "Workflow"
   // action:
-  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"clipboard"|"keyboard"|"sheetsCheckValue", collapsed: true, jsonOpen: false }
+  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"textBlocks"|"clipboard"|"keyboard"|"sheetsCheckValue", collapsed: true, jsonOpen: false }
 };
 
 let runState = {
@@ -77,6 +78,17 @@ let activeJsonWorkflowId = null;
 
 function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
+}
+
+function createTextBlock(text = "") {
+  return { id: uid(), text, enabled: true };
+}
+
+function getTotalTextBlocks() {
+  return state.actions.reduce((total, action) => {
+    if (action.type !== "textBlocks") return total;
+    return total + (Array.isArray(action.blocks) ? action.blocks.length : 0);
+  }, 0);
 }
 
 function showStatus(text, ms = 1800) {
@@ -126,7 +138,18 @@ async function loadState() {
       if (!Number.isFinite(a.clickCount)) a.clickCount = 1;
       if (typeof a.showClickDot !== "boolean") a.showClickDot = true;
     }
-    if (a.type === "simpleLoop" && typeof a.enabled !== "boolean") a.enabled = true;
+    if (a.type === "simpleLoop") {
+      if (typeof a.enabled !== "boolean") a.enabled = true;
+      if (!Number.isFinite(a.loopCount) || a.loopCount < 1) a.loopCount = 1;
+    }
+    if (a.type === "textBlocks") {
+      if (!Array.isArray(a.blocks)) a.blocks = [];
+      a.blocks = a.blocks.map((block) => ({
+        id: typeof block?.id === "string" ? block.id : uid(),
+        text: typeof block?.text === "string" ? block.text : "",
+        enabled: typeof block?.enabled === "boolean" ? block.enabled : true
+      }));
+    }
     if (a.type === "clipboard" && !["copy", "paste"].includes(a.mode)) {
       a.mode = "copy";
     }
@@ -438,12 +461,35 @@ addReloadTabNode.addEventListener("click", async () => {
 });
 
 addSimpleLoopNode.addEventListener("click", async () => {
-  const action = { id: uid(), type: "simpleLoop", collapsed: true, jsonOpen: false, enabled: true };
+  const totalBlocks = getTotalTextBlocks();
+  const action = {
+    id: uid(),
+    type: "simpleLoop",
+    collapsed: true,
+    jsonOpen: false,
+    enabled: true,
+    loopCount: totalBlocks > 0 ? totalBlocks : 1
+  };
   state.actions.push(action);
   await saveState();
   render();
   closeModal();
   showStatus("✅ Simple Loop node added");
+});
+
+addTextBlocksNode.addEventListener("click", async () => {
+  const action = {
+    id: uid(),
+    type: "textBlocks",
+    collapsed: true,
+    jsonOpen: false,
+    blocks: [createTextBlock("")]
+  };
+  state.actions.push(action);
+  await saveState();
+  render();
+  closeModal();
+  showStatus("✅ Text Blocks node added");
 });
 
 addClipboardNode.addEventListener("click", async () => {
@@ -528,6 +574,17 @@ playBtn.addEventListener("click", async () => {
       render();
       return;
     }
+    if (a.type === "textBlocks") {
+      const blocks = Array.isArray(a.blocks) ? a.blocks : [];
+      const hasEnabled = blocks.some((block) => block.enabled !== false);
+      if (!blocks.length || !hasEnabled) {
+        showStatus("⚠️ A Text Blocks node has no enabled blocks");
+        a.collapsed = false;
+        await saveState();
+        render();
+        return;
+      }
+    }
   }
 
   runState.status = "running";
@@ -605,7 +662,23 @@ function buildJsonForAction(action) {
     return { type: "reloadTab" };
   }
   if (action.type === "simpleLoop") {
-    return { type: "simpleLoop", enabled: action.enabled ?? true };
+    return {
+      type: "simpleLoop",
+      enabled: action.enabled ?? true,
+      loopCount: Number.isFinite(action.loopCount) ? Math.max(1, Math.round(action.loopCount)) : 1
+    };
+  }
+  if (action.type === "textBlocks") {
+    return {
+      type: "textBlocks",
+      blocks: Array.isArray(action.blocks)
+        ? action.blocks.map((block) => ({
+            id: block.id,
+            text: block.text ?? "",
+            enabled: block.enabled !== false
+          }))
+        : []
+    };
   }
   if (action.type === "clipboard") {
     return { type: "clipboard", mode: action.mode ?? "copy" };
@@ -790,6 +863,7 @@ function renderTimelineItem(action, idx, isLast) {
   if (action.type === "click") title.textContent = "Click";
   if (action.type === "reloadTab") title.textContent = "Reload Tab";
   if (action.type === "simpleLoop") title.textContent = "Simple Loop";
+  if (action.type === "textBlocks") title.textContent = "Text Blocks";
   if (action.type === "clipboard") title.textContent = "Clipboard";
   if (action.type === "keyboard") title.textContent = "Keyboard";
   if (action.type === "sheetsCheckValue") title.textContent = "Sheets Check Value";
@@ -816,7 +890,13 @@ function renderTimelineItem(action, idx, isLast) {
     sub.textContent = "• active tab";
   }
   if (action.type === "simpleLoop") {
-    sub.textContent = action.enabled ? "• enabled" : "• disabled";
+    const loops = Number.isFinite(action.loopCount) ? Math.max(1, Math.round(action.loopCount)) : 1;
+    sub.textContent = `${action.enabled ? "• enabled" : "• disabled"} • loops: ${loops}`;
+  }
+  if (action.type === "textBlocks") {
+    const total = Array.isArray(action.blocks) ? action.blocks.length : 0;
+    const used = Array.isArray(action.blocks) ? action.blocks.filter((block) => block.enabled === false).length : 0;
+    sub.textContent = total > 0 ? `• ${used}/${total} used` : "• no blocks";
   }
   if (action.type === "clipboard") {
     sub.textContent = action.mode === "paste" ? "• paste clipboard" : "• copy selection";
@@ -1097,8 +1177,91 @@ function renderTimelineItem(action, idx, isLast) {
       render();
     });
 
+    const countLabel = document.createElement("div");
+    countLabel.className = "pill";
+    countLabel.textContent = "Loop count";
+
+    const countInput = document.createElement("input");
+    countInput.className = "input";
+    countInput.type = "number";
+    countInput.min = "1";
+    countInput.step = "1";
+    countInput.style.width = "110px";
+    countInput.value = String(Number.isFinite(action.loopCount) ? Math.max(1, Math.round(action.loopCount)) : 1);
+    countInput.addEventListener("change", async () => {
+      const v = Number(countInput.value);
+      action.loopCount = Number.isFinite(v) ? Math.max(1, Math.round(v)) : 1;
+      await saveState();
+      render();
+    });
+
+    const totalBlocks = getTotalTextBlocks();
+    if (totalBlocks > 0) {
+      const detected = document.createElement("div");
+      detected.className = "pill";
+      detected.textContent = `Text blocks detected: ${totalBlocks}`;
+      left.appendChild(detected);
+    }
+
     left.appendChild(label);
     left.appendChild(toggle);
+    left.appendChild(countLabel);
+    left.appendChild(countInput);
+  }
+
+  if (action.type === "textBlocks") {
+    const addLabel = document.createElement("div");
+    addLabel.className = "pill";
+    addLabel.textContent = "Text blocks";
+
+    const addBtn = document.createElement("button");
+    addBtn.className = "btn";
+    addBtn.type = "button";
+    addBtn.textContent = "Add block";
+    addBtn.addEventListener("click", async () => {
+      action.blocks = Array.isArray(action.blocks) ? action.blocks : [];
+      action.blocks.push(createTextBlock(""));
+      await saveState();
+      render();
+    });
+
+    const enableAllBtn = document.createElement("button");
+    enableAllBtn.className = "btn";
+    enableAllBtn.type = "button";
+    enableAllBtn.textContent = "Enable all";
+    enableAllBtn.addEventListener("click", async () => {
+      action.blocks = Array.isArray(action.blocks) ? action.blocks : [];
+      action.blocks.forEach((block) => {
+        block.enabled = true;
+      });
+      await saveState();
+      render();
+    });
+
+    const disableAllBtn = document.createElement("button");
+    disableAllBtn.className = "btn";
+    disableAllBtn.type = "button";
+    disableAllBtn.textContent = "Disable all";
+    disableAllBtn.addEventListener("click", async () => {
+      action.blocks = Array.isArray(action.blocks) ? action.blocks : [];
+      action.blocks.forEach((block) => {
+        block.enabled = false;
+      });
+      await saveState();
+      render();
+    });
+
+    const total = Array.isArray(action.blocks) ? action.blocks.length : 0;
+    const used = Array.isArray(action.blocks) ? action.blocks.filter((block) => block.enabled === false).length : 0;
+    const progress = document.createElement("div");
+    progress.className = "pill";
+    progress.textContent = total > 0 ? `${used}/${total}` : "0/0";
+
+    left.appendChild(addLabel);
+    left.appendChild(addBtn);
+    left.appendChild(enableAllBtn);
+    left.appendChild(disableAllBtn);
+    left.appendChild(progress);
   }
 
   if (action.type === "clipboard") {
@@ -1293,6 +1456,54 @@ function renderTimelineItem(action, idx, isLast) {
   jsonToggleRow.appendChild(jsonBtn);
 
   body.appendChild(bodyTopRow);
+  if (action.type === "textBlocks") {
+    const list = document.createElement("div");
+    list.className = "textBlockList";
+
+    if (!Array.isArray(action.blocks) || action.blocks.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "pill";
+      empty.textContent = "No text blocks yet.";
+      list.appendChild(empty);
+    } else {
+      action.blocks.forEach((block, blockIndex) => {
+        const row = document.createElement("div");
+        row.className = "textBlockRow";
+
+        const indexBadge = document.createElement("div");
+        indexBadge.className = "textBlockIndex";
+        indexBadge.textContent = String(blockIndex + 1);
+
+        const input = document.createElement("textarea");
+        input.className = "textBlockInput";
+        input.rows = 2;
+        input.placeholder = "Enter text to paste";
+        input.value = block.text ?? "";
+        input.addEventListener("change", async () => {
+          block.text = input.value;
+          await saveState();
+          render();
+        });
+
+        const toggle = document.createElement("button");
+        toggle.className = "btn toggle" + (block.enabled !== false ? " active" : "");
+        toggle.type = "button";
+        toggle.textContent = block.enabled !== false ? "Enabled" : "Disabled";
+        toggle.addEventListener("click", async () => {
+          block.enabled = block.enabled === false;
+          await saveState();
+          render();
+        });
+
+        row.appendChild(indexBadge);
+        row.appendChild(input);
+        row.appendChild(toggle);
+        list.appendChild(row);
+      });
+    }
+
+    body.appendChild(list);
+  }
   body.appendChild(jsonToggleRow);
 
   if (action.jsonOpen) {
@@ -1461,6 +1672,20 @@ chrome.runtime.onMessage.addListener((msg) => {
         actual: msg.actual
       });
       render();
+    }
+  }
+
+  if (msg?.type === "TEXT_BLOCK_USED") {
+    const action = state.actions.find((item) => item.id === msg.actionId);
+    if (action && action.type === "textBlocks") {
+      const blocks = Array.isArray(action.blocks) ? action.blocks : [];
+      const block = blocks.find((item) => item.id === msg.blockId);
+      if (block) {
+        block.enabled = false;
+        saveState().then(render);
+      } else {
+        render();
+      }
     }
   }
 });

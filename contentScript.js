@@ -765,6 +765,12 @@
       return true;
     }
 
+    if (msg?.type === "INSERT_TEXT_BLOCK") {
+      const insertResult = insertTextIntoActiveElement(msg.text ?? "");
+      sendResponse(insertResult);
+      return true;
+    }
+
     if (msg?.type === "CLIPBOARD_PASTE") {
       (async () => {
         const readResult = await readClipboardText(msg.fallbackText);

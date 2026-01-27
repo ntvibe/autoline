@@ -185,9 +185,13 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 async function runFlow(actions, settings, runId) {
   // Normalize
   const globalDelayMs = Math.max(0, Number(settings.globalDelaySec ?? 1)) * 1000;
-  const loopEnabled = actions.some((action) => action.type === "simpleLoop" && action.enabled !== false);
+  const loopAction = actions.find((action) => action.type === "simpleLoop");
+  const loopEnabled = !!loopAction && loopAction.enabled !== false;
+  const maxLoops =
+    loopEnabled && Number.isFinite(loopAction?.loopCount) ? Math.max(1, Math.round(loopAction.loopCount)) : null;
   let pointerVisible = false;
   let flowTabId = null;
+  let loopIndex = 0;
 
   try {
     let shouldLoop = true;
@@ -312,6 +316,24 @@ async function runFlow(actions, settings, runId) {
         await sleepWithPause(0, runId);
       }
 
+      if (step.type === "textBlocks") {
+        const tab = await getActiveTab();
+        if (!tab) throw new Error("No active tab for Text Blocks action.");
+        const blocks = Array.isArray(step.blocks) ? step.blocks : [];
+        const nextIndex = blocks.findIndex((block) => block?.enabled !== false);
+        if (nextIndex < 0) {
+          throw new Error("Text Blocks node has no enabled blocks.");
+        }
+        const block = blocks[nextIndex];
+        const text = typeof block?.text === "string" ? block.text : "";
+        const insertResult = await sendMessageToTab(tab.id, { type: "INSERT_TEXT_BLOCK", text });
+        if (!insertResult?.ok) {
+          throw new Error(insertResult?.error || "Unable to insert text block.");
+        }
+        block.enabled = false;
+        chrome.runtime.sendMessage({ type: "TEXT_BLOCK_USED", actionId: step.id, blockId: block.id });
+      }
+
       if (step.type === "clipboard") {
         const tab = await getActiveTab();
         if (!tab) throw new Error("No active tab for clipboard action.");
@@ -422,7 +444,8 @@ async function runFlow(actions, settings, runId) {
         }
       }
 
-      if (!loopEnabled || !isActiveRun(runId)) {
+      loopIndex += 1;
+      if (!loopEnabled || !isActiveRun(runId) || (maxLoops && loopIndex >= maxLoops)) {
         shouldLoop = false;
       }
     }
