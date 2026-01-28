@@ -1,5 +1,6 @@
 const addNodeBtn = document.getElementById("addNodeBtn");
 const settingsBtn = document.getElementById("settingsBtn");
+const canvasBtn = document.getElementById("canvasBtn");
 const playBtn = document.getElementById("playBtn");
 const stopBtn = document.getElementById("stopBtn");
 
@@ -86,6 +87,7 @@ let runState = {
 let workflows = [];
 let activeJsonWorkflowId = null;
 let pendingSheetsCopyRequest = null;
+let ignoreCanvasStorageUpdate = false;
 
 const DEFAULT_ACTIVE_PHRASES = [
   { text: "In Progress", caseSensitive: false },
@@ -117,6 +119,85 @@ function normalizePhraseList(list, fallback) {
 
 function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
+}
+
+function getCanvasActions(canvasState) {
+  if (!canvasState || !Array.isArray(canvasState.nodes) || !Array.isArray(canvasState.connections)) {
+    return null;
+  }
+  const nodesById = new Map(canvasState.nodes.map((node) => [node.id, node]));
+  const startNode = canvasState.nodes.find((node) => node.kind === "start");
+  if (!startNode) return null;
+  const actions = [];
+  const visited = new Set();
+  let current = startNode;
+
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    if (current.kind === "action" && current.action) {
+      actions.push(current.action);
+    }
+    const connection = canvasState.connections.find((item) => item.from === current.id);
+    if (!connection) break;
+    current = nodesById.get(connection.to);
+    if (!current || current.kind === "end") break;
+  }
+
+  return actions;
+}
+
+async function syncCanvasStateFromActions(actions) {
+  const res = await chrome.storage.local.get("autolineCanvasState");
+  const canvasState = res.autolineCanvasState;
+  if (!canvasState || !Array.isArray(canvasState.nodes) || !Array.isArray(canvasState.connections)) {
+    return;
+  }
+
+  const nodesByActionId = new Map(
+    canvasState.nodes.filter((node) => node.kind === "action" && node.action?.id).map((node) => [node.action.id, node])
+  );
+  for (const action of actions) {
+    const node = nodesByActionId.get(action.id);
+    if (node) {
+      node.action = action;
+      node.label = action.type;
+    }
+  }
+
+  const actionIds = new Set(actions.map((action) => action.id));
+  canvasState.nodes = canvasState.nodes.filter((node) => {
+    if (node.kind !== "action") return true;
+    return node.action?.id && actionIds.has(node.action.id);
+  });
+  const nodeIds = new Set(canvasState.nodes.map((node) => node.id));
+  canvasState.connections = canvasState.connections.filter(
+    (connection) => nodeIds.has(connection.from) && nodeIds.has(connection.to)
+  );
+
+  const startNode = canvasState.nodes.find((node) => node.kind === "start");
+  const endNode = canvasState.nodes.find((node) => node.kind === "end");
+  if (!startNode || !endNode) return;
+
+  const existingActionIds = new Set(canvasState.nodes.filter((node) => node.kind === "action").map((node) => node.action.id));
+  if (existingActionIds.size < actions.length) {
+    const missing = actions.filter((action) => !existingActionIds.has(action.id));
+    let xOffset = endNode.position?.x ?? 600;
+    let yOffset = endNode.position?.y ?? 120;
+    missing.forEach((action, index) => {
+      canvasState.nodes.push({
+        id: uid(),
+        kind: "action",
+        label: action.type,
+        action,
+        expanded: false,
+        position: { x: xOffset + (index + 1) * 220, y: yOffset }
+      });
+    });
+  }
+
+  ignoreCanvasStorageUpdate = true;
+  await chrome.storage.local.set({ autolineCanvasState: canvasState });
+  ignoreCanvasStorageUpdate = false;
 }
 
 function createTextBlock(text = "") {
@@ -163,8 +244,12 @@ function copyTextToClipboard(text) {
 }
 
 async function loadState() {
-  const res = await chrome.storage.local.get("autolineState");
+  const res = await chrome.storage.local.get(["autolineState", "autolineCanvasState"]);
   if (res.autolineState) state = res.autolineState;
+  const canvasActions = getCanvasActions(res.autolineCanvasState);
+  if (Array.isArray(canvasActions)) {
+    state.actions = canvasActions;
+  }
 
   // Defaults (in case older saved state)
   state.settings ||= { globalDelaySec: 1 };
@@ -271,6 +356,7 @@ async function loadState() {
 
 async function saveState() {
   await chrome.storage.local.set({ autolineState: state });
+  await syncCanvasStateFromActions(state.actions);
 }
 
 async function loadWorkflows() {
@@ -353,6 +439,10 @@ function updatePointerPreviewFromInputs() {
 addNodeBtn.addEventListener("click", openModal);
 closeModalBtn.addEventListener("click", closeModal);
 settingsBtn.addEventListener("click", openSettings);
+canvasBtn.addEventListener("click", async () => {
+  const url = chrome.runtime.getURL("canvas.html");
+  await chrome.windows.create({ url, type: "popup", width: 1280, height: 800 });
+});
 closeSettingsBtn.addEventListener("click", closeSettings);
 
 modalBackdrop.addEventListener("click", (e) => {
@@ -2325,6 +2415,17 @@ chrome.runtime.onMessage.addListener((msg) => {
       } else {
         render();
       }
+    }
+  }
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || ignoreCanvasStorageUpdate) return;
+  if (changes.autolineCanvasState?.newValue) {
+    const canvasActions = getCanvasActions(changes.autolineCanvasState.newValue);
+    if (Array.isArray(canvasActions)) {
+      state.actions = canvasActions;
+      render();
     }
   }
 });
