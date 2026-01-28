@@ -2421,13 +2421,31 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || ignoreCanvasStorageUpdate) return;
+  let shouldRender = false;
   if (changes.autolineCanvasState?.newValue) {
     const canvasActions = getCanvasActions(changes.autolineCanvasState.newValue);
     if (Array.isArray(canvasActions)) {
       state.actions = canvasActions;
-      render();
+      shouldRender = true;
     }
   }
+  if (changes.autolineState?.newValue) {
+    const nextState = changes.autolineState.newValue;
+    if (typeof nextState.workflowName === "string" && nextState.workflowName.trim()) {
+      state.workflowName = nextState.workflowName;
+      shouldRender = true;
+    }
+    if (nextState.settings && typeof nextState.settings === "object") {
+      state.settings = nextState.settings;
+      applyTheme(state.settings.themeMode ?? "auto");
+      shouldRender = true;
+    }
+    if (!changes.autolineCanvasState?.newValue && Array.isArray(nextState.actions)) {
+      state.actions = nextState.actions;
+      shouldRender = true;
+    }
+  }
+  if (shouldRender) render();
 });
 
 function setPlayButtonState() {
