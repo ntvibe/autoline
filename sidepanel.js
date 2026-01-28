@@ -16,6 +16,7 @@ const addClipboardNode = document.getElementById("addClipboardNode");
 const addKeyboardNode = document.getElementById("addKeyboardNode");
 const addSheetsCheckValueNode = document.getElementById("addSheetsCheckValueNode");
 const addSheetsCopyNode = document.getElementById("addSheetsCopyNode");
+const addSheetsPasteNode = document.getElementById("addSheetsPasteNode");
 
 const settingsBackdrop = document.getElementById("settingsBackdrop");
 const closeSettingsBtn = document.getElementById("closeSettingsBtn");
@@ -70,7 +71,7 @@ let state = {
   actions: [],
   workflowName: "Workflow"
   // action:
-  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"textBlocks"|"clipboard"|"keyboard"|"sheetsCheckValue"|"sheetsCopy", collapsed: true, jsonOpen: false }
+  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"textBlocks"|"clipboard"|"keyboard"|"sheetsCheckValue"|"sheetsCopy"|"sheetsPaste", collapsed: true, jsonOpen: false }
 };
 
 let runState = {
@@ -104,6 +105,31 @@ function showStatus(text, ms = 1800) {
   statusEl.classList.remove("hidden");
   window.clearTimeout(showStatus._t);
   showStatus._t = window.setTimeout(() => statusEl.classList.add("hidden"), ms);
+}
+
+function copyTextToClipboard(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  const selection = window.getSelection();
+  const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, i) => selection.getRangeAt(i)) : [];
+  document.body.appendChild(textarea);
+  textarea.select();
+  let success = false;
+  try {
+    success = document.execCommand("copy");
+  } catch (e) {
+    success = false;
+  }
+  textarea.remove();
+  if (selection) {
+    selection.removeAllRanges();
+    ranges.forEach((range) => selection.addRange(range));
+  }
+  return success;
 }
 
 async function loadState() {
@@ -192,6 +218,10 @@ async function loadState() {
       if (typeof a.lastCopiedA1 !== "string") a.lastCopiedA1 = "";
       if (!Number.isFinite(a.lastCopiedLength)) a.lastCopiedLength = 0;
       if (typeof a.lastCopySuccess !== "boolean") a.lastCopySuccess = false;
+    }
+    if (a.type === "sheetsPaste") {
+      if (!Number.isFinite(a.lastPastedLength)) a.lastPastedLength = 0;
+      if (typeof a.lastPasteSuccess !== "boolean") a.lastPasteSuccess = false;
     }
   }
 
@@ -334,7 +364,10 @@ async function handleSheetsCopyRequest(request) {
   const formulaText = request?.formulaText ?? "";
   if (!requestId) return;
   try {
-    await navigator.clipboard.writeText(formulaText);
+    const copied = copyTextToClipboard(formulaText);
+    if (!copied) {
+      throw new Error("Clipboard write failed");
+    }
     await chrome.runtime.sendMessage({
       type: "SHEETS_COPY_RESULT",
       requestId,
@@ -404,7 +437,10 @@ sheetsCopyBtn.addEventListener("click", async () => {
   }
   const { requestId, a1, formulaText } = pendingSheetsCopyRequest;
   try {
-    await navigator.clipboard.writeText(formulaText ?? "");
+    const copied = copyTextToClipboard(formulaText ?? "");
+    if (!copied) {
+      throw new Error("Clipboard write failed");
+    }
     await chrome.runtime.sendMessage({
       type: "SHEETS_COPY_RESULT",
       requestId,
@@ -428,8 +464,8 @@ sheetsCopyBtn.addEventListener("click", async () => {
 copyWorkflowJsonBtn.addEventListener("click", async () => {
   const text = workflowJsonText.textContent || "";
   try {
-    await navigator.clipboard.writeText(text);
-    showStatus("✅ Workflow JSON copied");
+    const copied = copyTextToClipboard(text);
+    showStatus(copied ? "✅ Workflow JSON copied" : "⚠️ Unable to copy JSON");
   } catch (e) {
     showStatus("⚠️ Unable to copy JSON");
   }
@@ -653,6 +689,22 @@ addSheetsCopyNode.addEventListener("click", async () => {
   showStatus("✅ Sheets Copy node added");
 });
 
+addSheetsPasteNode.addEventListener("click", async () => {
+  const action = {
+    id: uid(),
+    type: "sheetsPaste",
+    collapsed: true,
+    jsonOpen: false,
+    lastPastedLength: 0,
+    lastPasteSuccess: false
+  };
+  state.actions.push(action);
+  await saveState();
+  render();
+  closeModal();
+  showStatus("✅ Sheets Paste node added");
+});
+
 playBtn.addEventListener("click", async () => {
   if (runState.status === "running") {
     await chrome.runtime.sendMessage({ type: "PAUSE_FLOW" });
@@ -819,6 +871,9 @@ function buildJsonForAction(action) {
   }
   if (action.type === "sheetsCopy") {
     return { type: "sheetsCopy" };
+  }
+  if (action.type === "sheetsPaste") {
+    return { type: "sheetsPaste" };
   }
   return { type: action.type };
 }
@@ -990,6 +1045,7 @@ function renderTimelineItem(action, idx, isLast) {
   if (action.type === "keyboard") title.textContent = "Keyboard";
   if (action.type === "sheetsCheckValue") title.textContent = "Sheets Check Value";
   if (action.type === "sheetsCopy") title.textContent = "Sheets Copy";
+  if (action.type === "sheetsPaste") title.textContent = "Sheets Paste";
 
   const sub = document.createElement("span");
   sub.className = "headerSub";
@@ -1047,6 +1103,9 @@ function renderTimelineItem(action, idx, isLast) {
   }
   if (action.type === "sheetsCopy") {
     sub.textContent = "• copy active cell";
+  }
+  if (action.type === "sheetsPaste") {
+    sub.textContent = "• paste runtime clipboard";
   }
 
   const headerRight = document.createElement("div");
@@ -1569,6 +1628,25 @@ function renderTimelineItem(action, idx, isLast) {
     left.appendChild(lastPill);
   }
 
+  if (action.type === "sheetsPaste") {
+    const label = document.createElement("div");
+    label.className = "pill";
+    label.textContent = "Paste runtime clipboard text";
+
+    const lastPill = document.createElement("div");
+    lastPill.className = "pill";
+    if (Number.isFinite(action.lastPastedLength)) {
+      const length = Number.isFinite(action.lastPastedLength) ? action.lastPastedLength : 0;
+      const status = action.lastPasteSuccess ? "pasted" : "not pasted";
+      lastPill.textContent = `Last ${status}: ${length} chars`;
+    } else {
+      lastPill.textContent = "Last paste: not available";
+    }
+
+    left.appendChild(label);
+    left.appendChild(lastPill);
+  }
+
   const del2 = document.createElement("button");
   del2.className = "deleteBtn";
   del2.setAttribute("aria-label", "Delete action");
@@ -1845,6 +1923,23 @@ chrome.runtime.onMessage.addListener((msg) => {
       showStatus("✅ Sheets cell copied");
     } else {
       showStatus(`⚠️ Sheets copy failed${msg.error ? `: ${msg.error}` : ""}`);
+    }
+  }
+
+  if (msg?.type === "SHEETS_PASTE_STATUS") {
+    if (msg.actionId) {
+      const action = state.actions.find((item) => item.id === msg.actionId);
+      if (action) {
+        action.lastPastedLength = Number.isFinite(msg.length) ? msg.length : 0;
+        action.lastPasteSuccess = msg.success === true;
+        saveState();
+      }
+      render();
+    }
+    if (msg.success) {
+      showStatus("✅ Runtime clipboard pasted");
+    } else {
+      showStatus(`⚠️ Sheets paste failed${msg.error ? `: ${msg.error}` : ""}`);
     }
   }
 

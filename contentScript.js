@@ -521,6 +521,31 @@
     pointerState.visible = false;
   }
 
+  function copyTextWithExecCommand(text) {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    const selection = window.getSelection();
+    const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, i) => selection.getRangeAt(i)) : [];
+    document.body.appendChild(textarea);
+    textarea.select();
+    let success = false;
+    try {
+      success = document.execCommand("copy");
+    } catch (e) {
+      success = false;
+    }
+    textarea.remove();
+    if (selection) {
+      selection.removeAllRanges();
+      ranges.forEach((range) => selection.addRange(range));
+    }
+    return success;
+  }
+
   async function copySelectionToClipboard() {
     let text = "";
     let source = "selection";
@@ -540,12 +565,11 @@
       text = selection ? selection.toString() : "";
     }
 
-    try {
-      await navigator.clipboard.writeText(text);
+    const success = copyTextWithExecCommand(text);
+    if (success) {
       return { ok: true, text, source, cellRef };
-    } catch (e) {
-      return { ok: false, text, source, cellRef, error: e?.message || "Clipboard write failed" };
     }
+    return { ok: false, text, source, cellRef, error: "Clipboard write failed" };
   }
 
   async function readClipboardText(fallbackText) {
