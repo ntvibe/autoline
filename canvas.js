@@ -81,6 +81,8 @@ let canvasState = {
 let workflows = [];
 let selectedNodeId = null;
 let dragState = null;
+let connectionDrag = null;
+let snapTarget = null;
 let workflowMode = "open";
 let runState = {
   status: "idle",
@@ -88,6 +90,7 @@ let runState = {
   doneActionIds: new Set()
 };
 let animationFrame = null;
+let ignoreStorageUpdate = false;
 
 function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
@@ -349,19 +352,82 @@ function normalizeCanvasState() {
   }
 }
 
+function syncCanvasStateWithActions(actions = [], workflowName = null) {
+  if (!Array.isArray(actions)) return;
+  const nodesByActionId = new Map(
+    canvasState.nodes.filter((node) => node.kind === "action" && node.action?.id).map((node) => [node.action.id, node])
+  );
+
+  actions.forEach((action) => {
+    const node = nodesByActionId.get(action.id);
+    if (node) {
+      node.action = action;
+      node.label = action.type;
+    }
+  });
+
+  const actionIds = new Set(actions.map((action) => action.id));
+  canvasState.nodes = canvasState.nodes.filter((node) => {
+    if (node.kind !== "action") return true;
+    return node.action?.id && actionIds.has(node.action.id);
+  });
+
+  const existingActionIds = new Set(
+    canvasState.nodes.filter((node) => node.kind === "action" && node.action?.id).map((node) => node.action.id)
+  );
+  const endNode = getEndNode();
+  const anchorX = endNode?.position?.x ?? 520;
+  const anchorY = endNode?.position?.y ?? 180;
+  actions.forEach((action, index) => {
+    if (existingActionIds.has(action.id)) return;
+    canvasState.nodes.push({
+      id: uid(),
+      kind: "action",
+      label: action.type,
+      action,
+      expanded: false,
+      position: { x: anchorX + (index + 1) * 220, y: anchorY }
+    });
+  });
+
+  const startNode = getStartNode();
+  const finalEndNode = getEndNode();
+  if (startNode && finalEndNode) {
+    canvasState.connections = [];
+    let prev = startNode;
+    actions.forEach((action) => {
+      const node = canvasState.nodes.find((item) => item.kind === "action" && item.action?.id === action.id);
+      if (!node) return;
+      connectNodes(prev.id, node.id);
+      prev = node;
+    });
+    connectNodes(prev.id, finalEndNode.id);
+  }
+
+  if (typeof workflowName === "string" && workflowName.trim()) {
+    canvasState.workflowName = workflowName.trim();
+  }
+  normalizeCanvasState();
+}
+
 async function loadWorkflows() {
   const res = await chrome.storage.local.get("autolineWorkflows");
   workflows = Array.isArray(res.autolineWorkflows) ? res.autolineWorkflows : [];
 }
 
 async function saveCanvasState() {
-  await chrome.storage.local.set({ autolineCanvasState: canvasState });
-  const actions = getFlowActionsFromCanvas();
-  const res = await chrome.storage.local.get("autolineState");
-  const nextState = res.autolineState ?? { actions: [], settings: {}, workflowName: canvasState.workflowName };
-  nextState.actions = actions;
-  nextState.workflowName = canvasState.workflowName || nextState.workflowName;
-  await chrome.storage.local.set({ autolineState: nextState });
+  ignoreStorageUpdate = true;
+  try {
+    await chrome.storage.local.set({ autolineCanvasState: canvasState });
+    const actions = getFlowActionsFromCanvas();
+    const res = await chrome.storage.local.get("autolineState");
+    const nextState = res.autolineState ?? { actions: [], settings: {}, workflowName: canvasState.workflowName };
+    nextState.actions = actions;
+    nextState.workflowName = canvasState.workflowName || nextState.workflowName;
+    await chrome.storage.local.set({ autolineState: nextState });
+  } finally {
+    ignoreStorageUpdate = false;
+  }
 }
 
 function applyTheme(mode) {
@@ -594,6 +660,25 @@ function renderNodes() {
     nodeEl.appendChild(body);
     nodeEl.appendChild(footer);
 
+    const inConnector = document.createElement("div");
+    inConnector.className = "nodeConnector in";
+    inConnector.dataset.connector = "in";
+    inConnector.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+      startConnectionDrag(node.id, "in", e);
+    });
+
+    const outConnector = document.createElement("div");
+    outConnector.className = "nodeConnector out";
+    outConnector.dataset.connector = "out";
+    outConnector.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+      startConnectionDrag(node.id, "out", e);
+    });
+
+    nodeEl.appendChild(inConnector);
+    nodeEl.appendChild(outConnector);
+
     nodeEl.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
       if (e.target.closest("input, textarea, select, button")) return;
@@ -626,48 +711,23 @@ function renderConnections() {
   const nodeById = new Map();
   nodeElements.forEach((el) => nodeById.set(getNodeIdFromElement(el), el));
 
-  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-  const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
-  marker.setAttribute("id", "arrow");
-  marker.setAttribute("markerWidth", "10");
-  marker.setAttribute("markerHeight", "10");
-  marker.setAttribute("refX", "8");
-  marker.setAttribute("refY", "3");
-  marker.setAttribute("orient", "auto");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", "M0,0 L8,3 L0,6 Z");
-  path.setAttribute("fill", "rgba(124, 108, 255, 0.7)");
-  marker.appendChild(path);
-  defs.appendChild(marker);
-  canvasLines.appendChild(defs);
-
   canvasState.connections.forEach((connection) => {
     const fromNode = getNodeById(connection.from);
     const toNode = getNodeById(connection.to);
     if (!fromNode || !toNode) return;
-    const fromEl = nodeById.get(connection.from);
-    const toEl = nodeById.get(connection.to);
-    if (!fromEl || !toEl) return;
-
-    const fromRect = fromEl.getBoundingClientRect();
-    const toRect = toEl.getBoundingClientRect();
-    const viewportRect = canvasInner.getBoundingClientRect();
-
-    const x1 = fromRect.left - viewportRect.left + fromRect.width / 2;
-    const y1 = fromRect.top - viewportRect.top + fromRect.height / 2;
-    const x2 = toRect.left - viewportRect.left + toRect.width / 2;
-    const y2 = toRect.top - viewportRect.top + toRect.height / 2;
-
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", x1);
-    line.setAttribute("y1", y1);
-    line.setAttribute("x2", x2);
-    line.setAttribute("y2", y2);
-    line.setAttribute("stroke", "rgba(124, 108, 255, 0.6)");
-    line.setAttribute("stroke-width", "2");
-    line.setAttribute("marker-end", "url(#arrow)");
-    canvasLines.appendChild(line);
+    const start = getConnectorPosition(connection.from, "out");
+    const end = getConnectorPosition(connection.to, "in");
+    if (!start || !end) return;
+    canvasLines.appendChild(createConnectionPath(start, end, "connection-path"));
   });
+
+  if (connectionDrag) {
+    const start = connectionDrag.start;
+    const end = connectionDrag.snapPoint || connectionDrag.current;
+    if (start && end) {
+      canvasLines.appendChild(createConnectionPath(start, end, "connection-path preview"));
+    }
+  }
 }
 
 function renderSidebar() {
@@ -1048,6 +1108,7 @@ async function runFromNode(nodeId) {
   runState.doneActionIds = new Set();
   render();
 
+  await chrome.runtime.sendMessage({ type: "FOCUS_SIDEPANEL" });
   await chrome.runtime.sendMessage({
     type: "RUN_FLOW",
     actions,
@@ -1089,14 +1150,15 @@ function updateRunnerAnimation(fromNode, toNode) {
   const fromRect = fromEl.getBoundingClientRect();
   const toRect = toEl.getBoundingClientRect();
   const viewportRect = canvasInner.getBoundingClientRect();
+  const zoom = canvasState.settings.zoom ?? 1;
 
   const start = {
-    x: fromRect.left - viewportRect.left + fromRect.width / 2,
-    y: fromRect.top - viewportRect.top + fromRect.height / 2
+    x: (fromRect.left - viewportRect.left + fromRect.width / 2) / zoom,
+    y: (fromRect.top - viewportRect.top + fromRect.height / 2) / zoom
   };
   const end = {
-    x: toRect.left - viewportRect.left + toRect.width / 2,
-    y: toRect.top - viewportRect.top + toRect.height / 2
+    x: (toRect.left - viewportRect.left + toRect.width / 2) / zoom,
+    y: (toRect.top - viewportRect.top + toRect.height / 2) / zoom
   };
 
   const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -1119,6 +1181,92 @@ function updateRunnerAnimation(fromNode, toNode) {
   }
 
   animationFrame = requestAnimationFrame(step);
+}
+
+function getCanvasPoint(clientX, clientY) {
+  const viewportRect = canvasInner.getBoundingClientRect();
+  const zoom = canvasState.settings.zoom ?? 1;
+  return {
+    x: (clientX - viewportRect.left) / zoom,
+    y: (clientY - viewportRect.top) / zoom
+  };
+}
+
+function getConnectorPosition(nodeId, side) {
+  const nodeEl = canvasNodes.querySelector(`.nodeCard[data-node-id="${nodeId}"]`);
+  if (!nodeEl) return null;
+  const connector = nodeEl.querySelector(`.nodeConnector.${side}`);
+  if (!connector) return null;
+  const rect = connector.getBoundingClientRect();
+  const viewportRect = canvasInner.getBoundingClientRect();
+  const zoom = canvasState.settings.zoom ?? 1;
+  return {
+    x: (rect.left - viewportRect.left + rect.width / 2) / zoom,
+    y: (rect.top - viewportRect.top + rect.height / 2) / zoom
+  };
+}
+
+function createConnectionPath(start, end, className) {
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  const dx = Math.max(80, Math.abs(end.x - start.x) * 0.5);
+  const curve = end.x >= start.x ? dx : -dx;
+  const c1x = start.x + curve;
+  const c2x = end.x - curve;
+  const d = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
+  path.setAttribute("d", d);
+  path.setAttribute("class", className);
+  return path;
+}
+
+function startConnectionDrag(nodeId, side, event) {
+  const start = getConnectorPosition(nodeId, side);
+  if (!start) return;
+  connectionDrag = {
+    nodeId,
+    side,
+    start,
+    current: getCanvasPoint(event.clientX, event.clientY),
+    snapPoint: null
+  };
+  updateSnapTarget(null);
+  renderConnections();
+}
+
+function updateSnapTarget(nextTarget) {
+  if (snapTarget?.el) {
+    snapTarget.el.classList.remove("snap");
+  }
+  snapTarget = nextTarget;
+  if (snapTarget?.el) {
+    snapTarget.el.classList.add("snap");
+  }
+}
+
+function findClosestConnector(point, excludeNodeId) {
+  const connectors = Array.from(canvasNodes.querySelectorAll(".nodeConnector"));
+  let best = null;
+  connectors.forEach((connector) => {
+    const nodeEl = connector.closest(".nodeCard");
+    if (!nodeEl) return;
+    const nodeId = nodeEl.dataset.nodeId;
+    if (!nodeId || nodeId === excludeNodeId) return;
+    const rect = connector.getBoundingClientRect();
+    const viewportRect = canvasInner.getBoundingClientRect();
+    const zoom = canvasState.settings.zoom ?? 1;
+    const cx = (rect.left - viewportRect.left + rect.width / 2) / zoom;
+    const cy = (rect.top - viewportRect.top + rect.height / 2) / zoom;
+    const dist = Math.hypot(point.x - cx, point.y - cy);
+    if (!best || dist < best.distance) {
+      best = {
+        distance: dist,
+        nodeId,
+        side: connector.classList.contains("in") ? "in" : "out",
+        point: { x: cx, y: cy },
+        el: connector
+      };
+    }
+  });
+  return best;
 }
 
 canvasAddNodeBtn.addEventListener("click", () => {
@@ -1206,6 +1354,7 @@ canvasPlayBtn.addEventListener("click", async () => {
   runState.doneActionIds = new Set();
   render();
 
+  await chrome.runtime.sendMessage({ type: "FOCUS_SIDEPANEL" });
   await chrome.runtime.sendMessage({
     type: "RUN_FLOW",
     actions: getFlowActionsFromCanvas(),
@@ -1241,6 +1390,22 @@ canvasViewport.addEventListener("mousemove", (e) => {
   renderConnections();
 });
 
+window.addEventListener("mousemove", (e) => {
+  if (!connectionDrag) return;
+  const point = getCanvasPoint(e.clientX, e.clientY);
+  connectionDrag.current = point;
+  const closest = findClosestConnector(point, connectionDrag.nodeId);
+  const snapThreshold = 28;
+  if (closest && closest.distance <= snapThreshold) {
+    connectionDrag.snapPoint = closest.point;
+    updateSnapTarget(closest);
+  } else {
+    connectionDrag.snapPoint = null;
+    updateSnapTarget(null);
+  }
+  renderConnections();
+});
+
 canvasViewport.addEventListener("mouseup", async () => {
   if (!dragState) return;
   dragState = null;
@@ -1249,8 +1414,38 @@ canvasViewport.addEventListener("mouseup", async () => {
 });
 
 window.addEventListener("mouseup", async () => {
-  if (!dragState) return;
-  dragState = null;
+  if (dragState) {
+    dragState = null;
+    await saveCanvasState();
+    render();
+    return;
+  }
+  if (!connectionDrag) return;
+  const target = snapTarget;
+  const startNode = getNodeById(connectionDrag.nodeId);
+  const targetNode = target ? getNodeById(target.nodeId) : null;
+  const startSide = connectionDrag.side;
+  connectionDrag = null;
+  updateSnapTarget(null);
+  if (!startNode || !targetNode || startNode.id === targetNode.id) {
+    renderConnections();
+    return;
+  }
+
+  let fromNode = null;
+  let toNode = null;
+  if (startSide === "out") {
+    fromNode = startNode;
+    toNode = targetNode;
+  } else {
+    fromNode = targetNode;
+    toNode = startNode;
+  }
+  if (fromNode.kind === "end" || toNode.kind === "start") {
+    renderConnections();
+    return;
+  }
+  connectNodes(fromNode.id, toNode.id);
   await saveCanvasState();
   render();
 });
@@ -1329,3 +1524,18 @@ async function init() {
 }
 
 init();
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || ignoreStorageUpdate) return;
+  if (changes.autolineCanvasState?.newValue) {
+    canvasState = changes.autolineCanvasState.newValue;
+    normalizeCanvasState();
+    render();
+    return;
+  }
+  if (changes.autolineState?.newValue) {
+    const nextState = changes.autolineState.newValue;
+    syncCanvasStateWithActions(nextState.actions ?? [], nextState.workflowName ?? canvasState.workflowName);
+    render();
+  }
+});

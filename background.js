@@ -115,6 +115,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     }
 
+    if (msg?.type === "FOCUS_SIDEPANEL") {
+      try {
+        const targetWindow = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+        if (targetWindow?.id) {
+          await chrome.windows.update(targetWindow.id, { focused: true });
+          if (chrome.sidePanel?.open) {
+            await chrome.sidePanel.open({ windowId: targetWindow.id });
+          }
+        }
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: e?.message || "Unable to focus side panel." });
+      }
+      return;
+    }
+
     if (msg?.type === "CLICK_RECORDED") {
       if (sender?.tab?.id) {
         await releaseDebuggerLock(sender.tab.id, "record");

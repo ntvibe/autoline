@@ -211,6 +211,7 @@ body {
   gap: 8px;
   cursor: grab;
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+  overflow: visible;
 }
 
 .nodeCard.running {
@@ -299,6 +300,56 @@ body {
 .nodeFooter .btn {
   padding: 6px 10px;
   font-size: 12px;
+}
+
+.nodeConnector {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid rgba(124, 108, 255, 0.85);
+  background: var(--bg);
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: crosshair;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.nodeConnector.in {
+  left: -8px;
+  transform: translate(-50%, -50%);
+}
+
+.nodeConnector.out {
+  right: -8px;
+  transform: translate(50%, -50%);
+}
+
+.nodeConnector.snap {
+  box-shadow: 0 0 12px rgba(124, 108, 255, 0.8);
+}
+
+.connection-path {
+  stroke: rgba(124, 108, 255, 0.7);
+  stroke-width: 2.5;
+  fill: none;
+  stroke-linecap: round;
+  stroke-dasharray: 10 8;
+  animation: dashFlow 6s linear infinite;
+}
+
+.connection-path.preview {
+  stroke: rgba(124, 108, 255, 0.5);
+  stroke-dasharray: 6 10;
+}
+
+@keyframes dashFlow {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -72;
+  }
 }
 
 .nodeBadge {
