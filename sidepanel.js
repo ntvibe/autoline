@@ -328,6 +328,32 @@ function closeSheetsCopyModal() {
   sheetsCopyText.textContent = "";
 }
 
+async function handleSheetsCopyRequest(request) {
+  const requestId = request?.requestId;
+  const a1 = request?.a1;
+  const formulaText = request?.formulaText ?? "";
+  if (!requestId) return;
+  try {
+    await navigator.clipboard.writeText(formulaText);
+    await chrome.runtime.sendMessage({
+      type: "SHEETS_COPY_RESULT",
+      requestId,
+      ok: true,
+      a1: a1 || null,
+      copiedTextLength: formulaText.length
+    });
+  } catch (e) {
+    await chrome.runtime.sendMessage({
+      type: "SHEETS_COPY_RESULT",
+      requestId,
+      ok: false,
+      a1: a1 || null,
+      copiedTextLength: 0,
+      error: e?.message || "Clipboard write failed"
+    });
+  }
+}
+
 workflowsBtn.addEventListener("click", openWorkflows);
 closeWorkflowsBtn.addEventListener("click", closeWorkflows);
 workflowsBackdrop.addEventListener("click", (e) => {
@@ -1778,7 +1804,8 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 
   if (msg?.type === "SHEETS_COPY_REQUEST") {
-    openSheetsCopyModal({
+    closeSheetsCopyModal();
+    handleSheetsCopyRequest({
       requestId: msg.requestId,
       a1: msg.a1,
       formulaText: msg.formulaText ?? ""
