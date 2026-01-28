@@ -1,0 +1,137 @@
+<!doctype html>
+<html data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Autoline Canvas</title>
+    <link rel="stylesheet" href="canvas.css" />
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+  </head>
+  <body>
+    <div class="canvasApp">
+      <header class="topbar">
+        <div class="brand">
+          <div class="logo">A</div>
+          <div>
+            <div class="title">Autoline Canvas</div>
+            <div class="subtitle">Workflow map</div>
+          </div>
+        </div>
+        <div class="topbarBtns">
+          <button id="canvasPlayBtn" class="iconBtn" title="Play" aria-label="Play">
+            <span class="material-icons" aria-hidden="true">play_arrow</span>
+          </button>
+          <button id="canvasPauseBtn" class="iconBtn" title="Pause" aria-label="Pause">
+            <span class="material-icons" aria-hidden="true">pause</span>
+          </button>
+          <button id="canvasStopBtn" class="iconBtn" title="Stop" aria-label="Stop">
+            <span class="material-icons" aria-hidden="true">stop</span>
+          </button>
+          <button id="canvasSettingsBtn" class="iconBtn" title="Settings" aria-label="Settings">
+            <span class="material-icons" aria-hidden="true">settings</span>
+          </button>
+          <button id="canvasAddNodeBtn" class="iconBtn" title="Add Node" aria-label="Add Node">
+            <span class="material-icons" aria-hidden="true">add</span>
+          </button>
+          <div class="divider" aria-hidden="true"></div>
+          <button id="canvasSaveBtn" class="btn primary">Save</button>
+          <button id="canvasOpenBtn" class="btn">Open</button>
+          <button id="canvasImportBtn" class="btn">Import</button>
+          <div class="divider" aria-hidden="true"></div>
+          <button id="canvasZoomOutBtn" class="iconBtn" title="Zoom out" aria-label="Zoom out">
+            <span class="material-icons" aria-hidden="true">zoom_out</span>
+          </button>
+          <button id="canvasZoomInBtn" class="iconBtn" title="Zoom in" aria-label="Zoom in">
+            <span class="material-icons" aria-hidden="true">zoom_in</span>
+          </button>
+          <button id="canvasFrameBtn" class="iconBtn" title="Frame all" aria-label="Frame all">
+            <span class="material-icons" aria-hidden="true">fit_screen</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="canvasMain">
+        <section class="canvasWorkspace">
+          <div class="workflowHeader">
+            <input id="workflowNameInput" class="workflowNameInput" type="text" value="Workflow" />
+            <span id="canvasStatus" class="status hidden"></span>
+          </div>
+          <div id="canvasViewport" class="canvasViewport">
+            <div id="canvasInner" class="canvasInner">
+              <svg id="canvasLines" class="canvasLines" aria-hidden="true"></svg>
+              <div id="canvasNodes" class="canvasNodes" aria-live="polite"></div>
+              <svg id="canvasRunner" class="canvasRunner" aria-hidden="true"></svg>
+            </div>
+          </div>
+        </section>
+
+        <aside id="nodeSidebar" class="nodeSidebar">
+          <div class="sidebarHeader">
+            <div>
+              <div class="sidebarTitle">Node options</div>
+              <div id="sidebarSubtitle" class="sidebarSubtitle">Select a node</div>
+            </div>
+            <button id="sidebarCloseBtn" class="iconBtn small" aria-label="Close sidebar">
+              <span class="material-icons" aria-hidden="true">close</span>
+            </button>
+          </div>
+          <div id="nodeOptions" class="nodeOptions"></div>
+        </aside>
+      </main>
+
+      <div id="addNodeBackdrop" class="backdrop hidden" role="dialog" aria-modal="true">
+        <div class="modal">
+          <div class="modalHeader">
+            <div class="modalTitle">Add node</div>
+            <button id="closeAddNodeBtn" class="iconBtn small" aria-label="Close">
+              <span class="material-icons" aria-hidden="true">close</span>
+            </button>
+          </div>
+          <div class="modalBody" id="addNodeList"></div>
+        </div>
+      </div>
+
+      <div id="settingsBackdrop" class="backdrop hidden" role="dialog" aria-modal="true">
+        <div class="modal">
+          <div class="modalHeader">
+            <div class="modalTitle">Canvas Settings</div>
+            <button id="closeSettingsBtn" class="iconBtn small" aria-label="Close">
+              <span class="material-icons" aria-hidden="true">close</span>
+            </button>
+          </div>
+          <div class="modalBody">
+            <div class="formRow">
+              <label class="label">Theme</label>
+              <select id="themeSelect" class="select">
+                <option value="auto">Auto (match system)</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </div>
+            <div class="formRow">
+              <label class="label">Run highlight speed (ms)</label>
+              <input id="runSpeedInput" class="input" type="number" min="200" step="100" />
+            </div>
+            <div class="formActions">
+              <button id="saveSettingsBtn" class="btn primary">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="workflowBackdrop" class="backdrop hidden" role="dialog" aria-modal="true">
+        <div class="modal">
+          <div class="modalHeader">
+            <div class="modalTitle" id="workflowModalTitle">Workflows</div>
+            <button id="closeWorkflowBtn" class="iconBtn small" aria-label="Close">
+              <span class="material-icons" aria-hidden="true">close</span>
+            </button>
+          </div>
+          <div class="modalBody" id="workflowList"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="canvas.js"></script>
+  </body>
+</html>
