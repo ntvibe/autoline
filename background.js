@@ -6,6 +6,15 @@ const urlSchemeRegex = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 const attachedDebugTabs = new Set();
 const debugLocks = new Map();
 let platformInfoPromise = null;
+const DEFAULT_ACTIVE_PHRASES = ["In Progress", "In Queue"];
+const DEFAULT_FAILURE_PHRASES = ["Failed"];
+const DEFAULT_HIGGSFIELD_CONFIG = {
+  threshold: 4,
+  pollIntervalSec: 1.5,
+  timeoutSec: 600,
+  highlight: true,
+  maxHighlights: 80
+};
 const runtimeClipboard = {
   text: "",
   meta: {
@@ -95,7 +104,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       runController.running = false;
       chrome.runtime.sendMessage({ type: "FLOW_STOP" });
       const active = await getActiveTab();
-      if (active) await sendMessageToTab(active.id, { type: "POINTER_HIDE" });
+      if (active) {
+        await sendMessageToTab(active.id, { type: "POINTER_HIDE" });
+        await sendMessageToTab(active.id, { type: "CLEAR_PHRASE_HIGHLIGHTS" });
+      }
       if (active?.id) {
         await releaseDebuggerLock(active.id, "flow");
       }
@@ -401,6 +413,64 @@ async function runFlow(actions, settings, runId) {
         }
       }
 
+      if (step.type === "higgsfieldAi") {
+        const tab = await getActiveTab();
+        if (!tab) throw new Error("No active tab for Higgsfield AI.");
+        const activePhrases = normalizePhraseList(step.activePhrases, DEFAULT_ACTIVE_PHRASES);
+        if (!activePhrases.length) {
+          throw new Error("Higgsfield AI node missing active phrases.");
+        }
+        const failurePhrases = normalizePhraseList(step.failurePhrases, DEFAULT_FAILURE_PHRASES);
+        const threshold = Number.isFinite(step.threshold)
+          ? Math.max(1, Math.round(step.threshold))
+          : DEFAULT_HIGGSFIELD_CONFIG.threshold;
+        const pollIntervalMs = Math.max(
+          200,
+          Number(step.pollIntervalSec ?? DEFAULT_HIGGSFIELD_CONFIG.pollIntervalSec) * 1000
+        );
+        const timeoutSec = Number(step.timeoutSec ?? DEFAULT_HIGGSFIELD_CONFIG.timeoutSec);
+        const timeoutMs = Number.isFinite(timeoutSec) && timeoutSec > 0 ? timeoutSec * 1000 : null;
+        const highlight = step.highlight !== false;
+        const maxHighlights = Number.isFinite(step.maxHighlights)
+          ? Math.max(0, Math.round(step.maxHighlights))
+          : DEFAULT_HIGGSFIELD_CONFIG.maxHighlights;
+        const startedAt = Date.now();
+
+        while (isActiveRun(runId)) {
+          await waitIfPaused(runId);
+          if (!isActiveRun(runId)) return;
+          const scanResult = await sendMessageToTab(tab.id, {
+            type: "SCAN_JOB_PHRASES",
+            activePhrases,
+            failurePhrases,
+            highlight,
+            maxHighlights
+          });
+          if (!scanResult?.ok) {
+            throw new Error("Unable to scan job status phrases.");
+          }
+          const activeCount = Number(scanResult.activeCount) || 0;
+          const failedCount = Number(scanResult.failedCount) || 0;
+          const waiting = activeCount >= threshold;
+          chrome.runtime.sendMessage({
+            type: "HIGGSFIELD_STATUS",
+            actionId: step.id,
+            activeCount,
+            failedCount,
+            threshold,
+            waiting
+          });
+          if (!waiting) break;
+          if (timeoutMs && Date.now() - startedAt >= timeoutMs) {
+            throw new Error(`Higgsfield AI timed out after ${Math.round(timeoutMs / 1000)}s.`);
+          }
+          await sleepWithPause(pollIntervalMs, runId);
+        }
+
+        if (!isActiveRun(runId)) return;
+        await sendMessageToTab(tab.id, { type: "CLEAR_PHRASE_HIGHLIGHTS" });
+      }
+
       if (step.type === "sheetsCheckValue") {
         const tab = await getActiveTab();
         if (!tab) throw new Error("No active tab for Sheets check.");
@@ -521,7 +591,10 @@ async function runFlow(actions, settings, runId) {
     if (!isActiveRun(runId)) return;
     chrome.runtime.sendMessage({ type: "FLOW_END" });
     const active = await getActiveTab();
-    if (active) await sendMessageToTab(active.id, { type: "POINTER_HIDE" });
+    if (active) {
+      await sendMessageToTab(active.id, { type: "POINTER_HIDE" });
+      await sendMessageToTab(active.id, { type: "CLEAR_PHRASE_HIGHLIGHTS" });
+    }
     runController.running = false;
   } finally {
     if (flowTabId) {
@@ -585,6 +658,21 @@ function normalizeUrl(rawUrl) {
   if (!trimmed) return "";
   if (urlSchemeRegex.test(trimmed)) return trimmed;
   return `https://${trimmed}`;
+}
+
+function normalizePhraseList(list, fallback) {
+  const source = Array.isArray(list) && list.length ? list : fallback;
+  if (!Array.isArray(source)) return [];
+  return source
+    .map((item) => {
+      if (typeof item === "string") return { text: item, caseSensitive: false };
+      if (!item) return null;
+      return {
+        text: typeof item.text === "string" ? item.text : "",
+        caseSensitive: item.caseSensitive === true
+      };
+    })
+    .filter((item) => item && item.text.trim());
 }
 
 function dispatchMouse(tabId, params) {
