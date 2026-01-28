@@ -15,6 +15,7 @@ const addTextBlocksNode = document.getElementById("addTextBlocksNode");
 const addClipboardNode = document.getElementById("addClipboardNode");
 const addKeyboardNode = document.getElementById("addKeyboardNode");
 const addSheetsCheckValueNode = document.getElementById("addSheetsCheckValueNode");
+const addSheetsCopyNode = document.getElementById("addSheetsCopyNode");
 
 const settingsBackdrop = document.getElementById("settingsBackdrop");
 const closeSettingsBtn = document.getElementById("closeSettingsBtn");
@@ -43,6 +44,12 @@ const workflowJsonText = document.getElementById("workflowJsonText");
 const closeWorkflowJsonBtn = document.getElementById("closeWorkflowJsonBtn");
 const copyWorkflowJsonBtn = document.getElementById("copyWorkflowJsonBtn");
 const backToWorkflowsBtn = document.getElementById("backToWorkflowsBtn");
+const sheetsCopyBackdrop = document.getElementById("sheetsCopyBackdrop");
+const sheetsCopyCell = document.getElementById("sheetsCopyCell");
+const sheetsCopyText = document.getElementById("sheetsCopyText");
+const sheetsCopyBtn = document.getElementById("sheetsCopyBtn");
+const sheetsCopyCancelBtn = document.getElementById("sheetsCopyCancelBtn");
+const closeSheetsCopyBtn = document.getElementById("closeSheetsCopyBtn");
 
 const actionsList = document.getElementById("actionsList");
 const statusEl = document.getElementById("status");
@@ -63,7 +70,7 @@ let state = {
   actions: [],
   workflowName: "Workflow"
   // action:
-  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"textBlocks"|"clipboard"|"keyboard"|"sheetsCheckValue", collapsed: true, jsonOpen: false }
+  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"textBlocks"|"clipboard"|"keyboard"|"sheetsCheckValue"|"sheetsCopy", collapsed: true, jsonOpen: false }
 };
 
 let runState = {
@@ -75,6 +82,7 @@ let runState = {
 
 let workflows = [];
 let activeJsonWorkflowId = null;
+let pendingSheetsCopyRequest = null;
 
 function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
@@ -179,6 +187,11 @@ async function loadState() {
       if (typeof a.cellRef !== "string") a.cellRef = "";
       if (typeof a.lastReadCellRef !== "string") a.lastReadCellRef = "";
       if (typeof a.lastReadValue !== "string") a.lastReadValue = "";
+    }
+    if (a.type === "sheetsCopy") {
+      if (typeof a.lastCopiedA1 !== "string") a.lastCopiedA1 = "";
+      if (!Number.isFinite(a.lastCopiedLength)) a.lastCopiedLength = 0;
+      if (typeof a.lastCopySuccess !== "boolean") a.lastCopySuccess = false;
     }
   }
 
@@ -302,6 +315,19 @@ function closeWorkflowJson() {
   activeJsonWorkflowId = null;
 }
 
+function openSheetsCopyModal(request) {
+  pendingSheetsCopyRequest = request;
+  sheetsCopyCell.textContent = `Active cell: ${request?.a1 || "-"}`;
+  sheetsCopyText.textContent = request?.formulaText ?? "";
+  sheetsCopyBackdrop.classList.remove("hidden");
+}
+
+function closeSheetsCopyModal() {
+  sheetsCopyBackdrop.classList.add("hidden");
+  pendingSheetsCopyRequest = null;
+  sheetsCopyText.textContent = "";
+}
+
 workflowsBtn.addEventListener("click", openWorkflows);
 closeWorkflowsBtn.addEventListener("click", closeWorkflows);
 workflowsBackdrop.addEventListener("click", (e) => {
@@ -321,6 +347,56 @@ workflowJsonBackdrop.addEventListener("click", (e) => {
     closeWorkflowJson();
     openWorkflows();
   }
+});
+
+sheetsCopyBackdrop.addEventListener("click", (e) => {
+  if (e.target === sheetsCopyBackdrop) {
+    closeSheetsCopyModal();
+  }
+});
+closeSheetsCopyBtn.addEventListener("click", closeSheetsCopyModal);
+sheetsCopyCancelBtn.addEventListener("click", async () => {
+  if (!pendingSheetsCopyRequest) {
+    closeSheetsCopyModal();
+    return;
+  }
+  const { requestId, a1 } = pendingSheetsCopyRequest;
+  await chrome.runtime.sendMessage({
+    type: "SHEETS_COPY_RESULT",
+    requestId,
+    ok: false,
+    a1: a1 || null,
+    copiedTextLength: 0,
+    error: "Copy canceled"
+  });
+  closeSheetsCopyModal();
+});
+sheetsCopyBtn.addEventListener("click", async () => {
+  if (!pendingSheetsCopyRequest) {
+    closeSheetsCopyModal();
+    return;
+  }
+  const { requestId, a1, formulaText } = pendingSheetsCopyRequest;
+  try {
+    await navigator.clipboard.writeText(formulaText ?? "");
+    await chrome.runtime.sendMessage({
+      type: "SHEETS_COPY_RESULT",
+      requestId,
+      ok: true,
+      a1: a1 || null,
+      copiedTextLength: (formulaText ?? "").length
+    });
+  } catch (e) {
+    await chrome.runtime.sendMessage({
+      type: "SHEETS_COPY_RESULT",
+      requestId,
+      ok: false,
+      a1: a1 || null,
+      copiedTextLength: 0,
+      error: e?.message || "Clipboard write failed"
+    });
+  }
+  closeSheetsCopyModal();
 });
 
 copyWorkflowJsonBtn.addEventListener("click", async () => {
@@ -534,6 +610,23 @@ addSheetsCheckValueNode.addEventListener("click", async () => {
   showStatus("✅ Sheets Check Value node added");
 });
 
+addSheetsCopyNode.addEventListener("click", async () => {
+  const action = {
+    id: uid(),
+    type: "sheetsCopy",
+    collapsed: true,
+    jsonOpen: false,
+    lastCopiedA1: "",
+    lastCopiedLength: 0,
+    lastCopySuccess: false
+  };
+  state.actions.push(action);
+  await saveState();
+  render();
+  closeModal();
+  showStatus("✅ Sheets Copy node added");
+});
+
 playBtn.addEventListener("click", async () => {
   if (runState.status === "running") {
     await chrome.runtime.sendMessage({ type: "PAUSE_FLOW" });
@@ -697,6 +790,9 @@ function buildJsonForAction(action) {
       expectedValue: action.expectedValue ?? "",
       cellRef: action.cellRef ?? ""
     };
+  }
+  if (action.type === "sheetsCopy") {
+    return { type: "sheetsCopy" };
   }
   return { type: action.type };
 }
@@ -867,6 +963,7 @@ function renderTimelineItem(action, idx, isLast) {
   if (action.type === "clipboard") title.textContent = "Clipboard";
   if (action.type === "keyboard") title.textContent = "Keyboard";
   if (action.type === "sheetsCheckValue") title.textContent = "Sheets Check Value";
+  if (action.type === "sheetsCopy") title.textContent = "Sheets Copy";
 
   const sub = document.createElement("span");
   sub.className = "headerSub";
@@ -921,6 +1018,9 @@ function renderTimelineItem(action, idx, isLast) {
     const cellLabel = action.cellRef ? ` ${action.cellRef}` : " selection";
     const expectedLabel = action.expectedValue ? ` = "${truncate(action.expectedValue, 18)}"` : "";
     sub.textContent = `•${cellLabel}${expectedLabel}`;
+  }
+  if (action.type === "sheetsCopy") {
+    sub.textContent = "• copy active cell";
   }
 
   const headerRight = document.createElement("div");
@@ -1423,6 +1523,26 @@ function renderTimelineItem(action, idx, isLast) {
     left.appendChild(readPill);
   }
 
+  if (action.type === "sheetsCopy") {
+    const label = document.createElement("div");
+    label.className = "pill";
+    label.textContent = "Copy active cell text";
+
+    const lastPill = document.createElement("div");
+    lastPill.className = "pill";
+    if (action.lastCopiedA1 || Number.isFinite(action.lastCopiedLength)) {
+      const cell = action.lastCopiedA1 ? action.lastCopiedA1 : "selection";
+      const length = Number.isFinite(action.lastCopiedLength) ? action.lastCopiedLength : 0;
+      const status = action.lastCopySuccess ? "copied" : "not copied";
+      lastPill.textContent = `Last ${status}: ${cell} (${length} chars)`;
+    } else {
+      lastPill.textContent = "Last copied: not available";
+    }
+
+    left.appendChild(label);
+    left.appendChild(lastPill);
+  }
+
   const del2 = document.createElement("button");
   del2.className = "deleteBtn";
   del2.setAttribute("aria-label", "Delete action");
@@ -1657,6 +1777,14 @@ chrome.runtime.onMessage.addListener((msg) => {
     showStatus("❌ Flow error: " + msg.error, 3500);
   }
 
+  if (msg?.type === "SHEETS_COPY_REQUEST") {
+    openSheetsCopyModal({
+      requestId: msg.requestId,
+      a1: msg.a1,
+      formulaText: msg.formulaText ?? ""
+    });
+  }
+
   if (msg?.type === "SHEETS_CHECK_RESULT") {
     if (msg.actionId) {
       const action = state.actions.find((item) => item.id === msg.actionId);
@@ -1672,6 +1800,24 @@ chrome.runtime.onMessage.addListener((msg) => {
         actual: msg.actual
       });
       render();
+    }
+  }
+
+  if (msg?.type === "SHEETS_COPY_STATUS") {
+    if (msg.actionId) {
+      const action = state.actions.find((item) => item.id === msg.actionId);
+      if (action) {
+        action.lastCopiedA1 = msg.a1 ?? "";
+        action.lastCopiedLength = Number.isFinite(msg.copiedTextLength) ? msg.copiedTextLength : 0;
+        action.lastCopySuccess = msg.success === true;
+        saveState();
+      }
+      render();
+    }
+    if (msg.success) {
+      showStatus("✅ Sheets cell copied");
+    } else {
+      showStatus(`⚠️ Sheets copy failed${msg.error ? `: ${msg.error}` : ""}`);
     }
   }
 

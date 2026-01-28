@@ -5,6 +5,7 @@ const chunkDelay = 150;
 const urlSchemeRegex = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 const attachedDebugTabs = new Set();
 const debugLocks = new Map();
+const sheetsCopyRequests = new Map();
 let platformInfoPromise = null;
 
 // Open side panel on icon click
@@ -147,6 +148,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       } finally {
         await releaseDebuggerLock(tabId, "read");
       }
+      return;
+    }
+
+    if (msg?.type === "SHEETS_COPY_RESULT") {
+      const requestId = msg.requestId;
+      if (typeof requestId !== "string") {
+        sendResponse({ ok: false, error: "Missing requestId." });
+        return;
+      }
+      const resolver = sheetsCopyRequests.get(requestId);
+      if (resolver) {
+        sheetsCopyRequests.delete(requestId);
+        resolver({
+          ok: msg.ok === true,
+          a1: msg.a1 ?? null,
+          copiedTextLength: Number.isFinite(msg.copiedTextLength) ? msg.copiedTextLength : 0,
+          error: msg.error
+        });
+      }
+      sendResponse({ ok: true });
       return;
     }
 
@@ -420,28 +441,64 @@ async function runFlow(actions, settings, runId) {
         }
       }
 
-        chrome.runtime.sendMessage({ type: "FLOW_STEP_END", actionId: step.id, index: i });
+      if (step.type === "sheetsCopy") {
+        const tab = await getActiveTab();
+        if (!tab) throw new Error("No active tab for Sheets copy.");
+        await ensureDebuggerLock(tab.id, "flow");
+        const result = await readSheetsCopyViaDebugger(tab.id);
+        if (!result?.ok) {
+          chrome.runtime.sendMessage({
+            type: "SHEETS_COPY_STATUS",
+            actionId: step.id,
+            success: false,
+            a1: result?.a1 ?? null,
+            copiedTextLength: 0,
+            error: "No active cell detected."
+          });
+          continue;
+        }
+        const formulaText = typeof result.formulaText === "string" ? result.formulaText : "";
+        const copyResult = await requestSheetsCopyFromSidepanel({
+          a1: result.a1,
+          formulaText
+        });
+        chrome.runtime.sendMessage({
+          type: "SHEETS_COPY_STATUS",
+          actionId: step.id,
+          success: copyResult?.ok === true,
+          a1: result.a1 ?? null,
+          copiedTextLength:
+            copyResult?.ok === true
+              ? Number.isFinite(copyResult.copiedTextLength)
+                ? copyResult.copiedTextLength
+                : formulaText.length
+              : 0,
+          error: copyResult?.error
+        });
+      }
+
+      chrome.runtime.sendMessage({ type: "FLOW_STEP_END", actionId: step.id, index: i });
 
       // Global delay between steps (don’t add extra after last)
-        if (i !== actions.length - 1 && globalDelayMs > 0) {
-          const nextStep = actions[i + 1];
-          if (step.type === "click" && nextStep?.type === "click") {
-            const tab = await getActiveTab();
-            if (tab) {
-              const nextResolved = await ensureClickVisible(tab.id, nextStep);
-              if (nextResolved) {
-                await sendMessageToTab(tab.id, {
-                  type: "POINTER_MOVE",
-                  x: nextResolved.click.x,
-                  y: nextResolved.click.y,
-                  duration: globalDelayMs,
-                  settings
-                });
-              }
+      if (i !== actions.length - 1 && globalDelayMs > 0) {
+        const nextStep = actions[i + 1];
+        if (step.type === "click" && nextStep?.type === "click") {
+          const tab = await getActiveTab();
+          if (tab) {
+            const nextResolved = await ensureClickVisible(tab.id, nextStep);
+            if (nextResolved) {
+              await sendMessageToTab(tab.id, {
+                type: "POINTER_MOVE",
+                x: nextResolved.click.x,
+                y: nextResolved.click.y,
+                duration: globalDelayMs,
+                settings
+              });
             }
           }
-          await sleepWithPause(globalDelayMs, runId);
         }
+        await sleepWithPause(globalDelayMs, runId);
+      }
       }
 
       loopIndex += 1;
@@ -818,4 +875,65 @@ async function readSheetsSelectionViaDebugger(tabId) {
     returnByValue: true
   });
   return result?.result?.value ?? { ok: false, error: "Sheets check failed." };
+}
+
+async function readSheetsCopyViaDebugger(tabId) {
+  const expression = `(() => {
+  const pickVisible = (els) =>
+    els.find(el => {
+      const r = el.getBoundingClientRect?.();
+      return r && r.width > 0 && r.height > 0;
+    }) || null;
+
+  const byId = (...ids) => ids.map(id => document.getElementById(id)).filter(Boolean);
+
+  const nameEl =
+    pickVisible(byId("t-name-box")) ||
+    pickVisible([...document.querySelectorAll('input[id*="name"][id*="box" i]')]);
+
+  const a1 = nameEl && "value" in nameEl ? nameEl.value.trim() : null;
+
+  const formulaEl =
+    pickVisible(byId("t-formula-bar-input", "t-formula-bar")) ||
+    pickVisible([...document.querySelectorAll('textarea[id*="formula" i], input[id*="formula" i]')]) ||
+    pickVisible(
+      [...document.querySelectorAll('[contenteditable="true"]')]
+        .filter(el => (el.id || "").toLowerCase().includes("formula"))
+    );
+
+  let formulaText = null;
+  if (formulaEl) {
+    formulaText = ("value" in formulaEl ? formulaEl.value : formulaEl.textContent || "").trim();
+  }
+
+  return { ok: !!a1, a1: a1 || null, formulaText: formulaText || "" };
+})()`;
+  const result = await sendDebuggerCommand(tabId, "Runtime.evaluate", {
+    expression,
+    returnByValue: true
+  });
+  return result?.result?.value ?? { ok: false, a1: null, formulaText: "" };
+}
+
+async function requestSheetsCopyFromSidepanel({ a1, formulaText }) {
+  const requestId = `sheetsCopy-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const responsePromise = new Promise((resolve) => {
+    sheetsCopyRequests.set(requestId, resolve);
+  });
+  chrome.runtime.sendMessage({
+    type: "SHEETS_COPY_REQUEST",
+    requestId,
+    a1,
+    formulaText
+  });
+  const timeoutMs = 60000;
+  const timeoutPromise = new Promise((resolve) => {
+    setTimeout(() => {
+      if (sheetsCopyRequests.has(requestId)) {
+        sheetsCopyRequests.delete(requestId);
+        resolve({ ok: false, a1: a1 || null, copiedTextLength: 0, error: "Sheets copy timed out." });
+      }
+    }, timeoutMs);
+  });
+  return Promise.race([responsePromise, timeoutPromise]);
 }

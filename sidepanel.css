@@ -573,6 +573,19 @@ html, body {
   white-space: pre;
 }
 
+.copyBox {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(var(--accent-rgb), 0.06);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow: auto;
+}
+
 /* --- modal --- */
 .backdrop {
   position: fixed;
