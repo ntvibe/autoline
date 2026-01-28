@@ -17,6 +17,7 @@ const addKeyboardNode = document.getElementById("addKeyboardNode");
 const addSheetsCheckValueNode = document.getElementById("addSheetsCheckValueNode");
 const addSheetsCopyNode = document.getElementById("addSheetsCopyNode");
 const addSheetsPasteNode = document.getElementById("addSheetsPasteNode");
+const addHiggsfieldAiNode = document.getElementById("addHiggsfieldAiNode");
 
 const settingsBackdrop = document.getElementById("settingsBackdrop");
 const closeSettingsBtn = document.getElementById("closeSettingsBtn");
@@ -71,19 +72,48 @@ let state = {
   actions: [],
   workflowName: "Workflow"
   // action:
-  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"textBlocks"|"clipboard"|"keyboard"|"sheetsCheckValue"|"sheetsCopy"|"sheetsPaste", collapsed: true, jsonOpen: false }
+  // { id, type: "switchTab"|"delay"|"openUrl"|"click"|"reloadTab"|"simpleLoop"|"textBlocks"|"clipboard"|"keyboard"|"sheetsCheckValue"|"sheetsCopy"|"sheetsPaste"|"higgsfieldAi", collapsed: true, jsonOpen: false }
 };
 
 let runState = {
   status: "idle",
   currentId: null,
   doneIds: new Set(),
-  checkResults: new Map()
+  checkResults: new Map(),
+  higgsfieldStatus: new Map()
 };
 
 let workflows = [];
 let activeJsonWorkflowId = null;
 let pendingSheetsCopyRequest = null;
+
+const DEFAULT_ACTIVE_PHRASES = [
+  { text: "In Progress", caseSensitive: false },
+  { text: "In Queue", caseSensitive: false }
+];
+const DEFAULT_FAILURE_PHRASES = [{ text: "Failed", caseSensitive: false }];
+const DEFAULT_HIGGSFIELD_CONFIG = {
+  threshold: 4,
+  highlight: true,
+  pollIntervalSec: 1.5,
+  timeoutSec: 600,
+  maxHighlights: 80
+};
+
+function normalizePhraseList(list, fallback) {
+  const source = Array.isArray(list) && list.length ? list : fallback;
+  if (!Array.isArray(source)) return [];
+  return source
+    .map((item) => {
+      if (typeof item === "string") return { text: item, caseSensitive: false };
+      if (!item) return null;
+      return {
+        text: typeof item.text === "string" ? item.text : "",
+        caseSensitive: item.caseSensitive === true
+      };
+    })
+    .filter((item) => item && item.text.trim());
+}
 
 function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
@@ -222,6 +252,15 @@ async function loadState() {
     if (a.type === "sheetsPaste") {
       if (!Number.isFinite(a.lastPastedLength)) a.lastPastedLength = 0;
       if (typeof a.lastPasteSuccess !== "boolean") a.lastPasteSuccess = false;
+    }
+    if (a.type === "higgsfieldAi") {
+      a.activePhrases = normalizePhraseList(a.activePhrases, DEFAULT_ACTIVE_PHRASES);
+      a.failurePhrases = normalizePhraseList(a.failurePhrases, DEFAULT_FAILURE_PHRASES);
+      if (!Number.isFinite(a.threshold)) a.threshold = DEFAULT_HIGGSFIELD_CONFIG.threshold;
+      if (typeof a.highlight !== "boolean") a.highlight = DEFAULT_HIGGSFIELD_CONFIG.highlight;
+      if (!Number.isFinite(a.pollIntervalSec)) a.pollIntervalSec = DEFAULT_HIGGSFIELD_CONFIG.pollIntervalSec;
+      if (!Number.isFinite(a.timeoutSec)) a.timeoutSec = DEFAULT_HIGGSFIELD_CONFIG.timeoutSec;
+      if (!Number.isFinite(a.maxHighlights)) a.maxHighlights = DEFAULT_HIGGSFIELD_CONFIG.maxHighlights;
     }
   }
 
@@ -705,6 +744,27 @@ addSheetsPasteNode.addEventListener("click", async () => {
   showStatus("✅ Sheets Paste node added");
 });
 
+addHiggsfieldAiNode.addEventListener("click", async () => {
+  const action = {
+    id: uid(),
+    type: "higgsfieldAi",
+    collapsed: true,
+    jsonOpen: false,
+    activePhrases: DEFAULT_ACTIVE_PHRASES.map((item) => ({ ...item })),
+    failurePhrases: DEFAULT_FAILURE_PHRASES.map((item) => ({ ...item })),
+    threshold: DEFAULT_HIGGSFIELD_CONFIG.threshold,
+    highlight: DEFAULT_HIGGSFIELD_CONFIG.highlight,
+    pollIntervalSec: DEFAULT_HIGGSFIELD_CONFIG.pollIntervalSec,
+    timeoutSec: DEFAULT_HIGGSFIELD_CONFIG.timeoutSec,
+    maxHighlights: DEFAULT_HIGGSFIELD_CONFIG.maxHighlights
+  };
+  state.actions.push(action);
+  await saveState();
+  render();
+  closeModal();
+  showStatus("✅ Higgsfield AI node added");
+});
+
 playBtn.addEventListener("click", async () => {
   if (runState.status === "running") {
     await chrome.runtime.sendMessage({ type: "PAUSE_FLOW" });
@@ -750,6 +810,16 @@ playBtn.addEventListener("click", async () => {
       const hasEnabled = blocks.some((block) => block.enabled !== false);
       if (!blocks.length || !hasEnabled) {
         showStatus("⚠️ A Text Blocks node has no enabled blocks");
+        a.collapsed = false;
+        await saveState();
+        render();
+        return;
+      }
+    }
+    if (a.type === "higgsfieldAi") {
+      const activePhrases = normalizePhraseList(a.activePhrases, DEFAULT_ACTIVE_PHRASES);
+      if (!activePhrases.length) {
+        showStatus("⚠️ Higgsfield AI needs at least one active phrase");
         a.collapsed = false;
         await saveState();
         render();
@@ -874,6 +944,22 @@ function buildJsonForAction(action) {
   }
   if (action.type === "sheetsPaste") {
     return { type: "sheetsPaste" };
+  }
+  if (action.type === "higgsfieldAi") {
+    return {
+      type: "higgsfieldAi",
+      activePhrases: normalizePhraseList(action.activePhrases, DEFAULT_ACTIVE_PHRASES),
+      failurePhrases: normalizePhraseList(action.failurePhrases, DEFAULT_FAILURE_PHRASES),
+      threshold: Number.isFinite(action.threshold) ? action.threshold : DEFAULT_HIGGSFIELD_CONFIG.threshold,
+      highlight: action.highlight !== false,
+      pollIntervalSec: Number.isFinite(action.pollIntervalSec)
+        ? Math.max(0.2, action.pollIntervalSec)
+        : DEFAULT_HIGGSFIELD_CONFIG.pollIntervalSec,
+      timeoutSec: Number.isFinite(action.timeoutSec) ? Math.max(0, action.timeoutSec) : DEFAULT_HIGGSFIELD_CONFIG.timeoutSec,
+      maxHighlights: Number.isFinite(action.maxHighlights)
+        ? Math.max(0, Math.round(action.maxHighlights))
+        : DEFAULT_HIGGSFIELD_CONFIG.maxHighlights
+    };
   }
   return { type: action.type };
 }
@@ -1046,6 +1132,7 @@ function renderTimelineItem(action, idx, isLast) {
   if (action.type === "sheetsCheckValue") title.textContent = "Sheets Check Value";
   if (action.type === "sheetsCopy") title.textContent = "Sheets Copy";
   if (action.type === "sheetsPaste") title.textContent = "Sheets Paste";
+  if (action.type === "higgsfieldAi") title.textContent = "Higgsfield AI";
 
   const sub = document.createElement("span");
   sub.className = "headerSub";
@@ -1107,6 +1194,11 @@ function renderTimelineItem(action, idx, isLast) {
   if (action.type === "sheetsPaste") {
     sub.textContent = "• paste runtime clipboard";
   }
+  if (action.type === "higgsfieldAi") {
+    const threshold = Number.isFinite(action.threshold) ? action.threshold : DEFAULT_HIGGSFIELD_CONFIG.threshold;
+    const phraseCount = Array.isArray(action.activePhrases) ? action.activePhrases.length : 0;
+    sub.textContent = `• max ${threshold} • ${phraseCount} active phrase${phraseCount === 1 ? "" : "s"}`;
+  }
 
   const headerRight = document.createElement("div");
   headerRight.className = "headerRight";
@@ -1164,7 +1256,7 @@ function renderTimelineItem(action, idx, isLast) {
   bodyTopRow.style.justifyContent = "space-between";
 
   const left = document.createElement("div");
-  left.className = "row";
+  left.className = action.type === "higgsfieldAi" ? "stack" : "row";
 
   if (action.type === "switchTab") {
     const pickBtn = document.createElement("button");
@@ -1647,6 +1739,269 @@ function renderTimelineItem(action, idx, isLast) {
     left.appendChild(lastPill);
   }
 
+  if (action.type === "higgsfieldAi") {
+    const status = runState.higgsfieldStatus.get(action.id);
+    if (status) {
+      const statusRow = document.createElement("div");
+      statusRow.className = "row";
+      const activePill = document.createElement("div");
+      activePill.className = "pill";
+      activePill.textContent = `Active jobs: ${status.activeCount} / ${status.threshold} → ${
+        status.waiting ? "Waiting…" : "Ready"
+      }`;
+      const failedPill = document.createElement("div");
+      failedPill.className = "pill";
+      failedPill.textContent = `Failed: ${status.failedCount}`;
+      statusRow.appendChild(activePill);
+      statusRow.appendChild(failedPill);
+      left.appendChild(statusRow);
+    }
+
+    const activeSection = document.createElement("div");
+    activeSection.className = "phraseSection";
+    const activeLabel = document.createElement("div");
+    activeLabel.className = "pill";
+    activeLabel.textContent = "Count these phrases as active jobs";
+    const activeList = document.createElement("div");
+    activeList.className = "phraseList";
+
+    const activePhrases = normalizePhraseList(action.activePhrases, DEFAULT_ACTIVE_PHRASES);
+    if (!activePhrases.length) activePhrases.push({ text: "", caseSensitive: false });
+    action.activePhrases = activePhrases;
+
+    activePhrases.forEach((phrase, phraseIndex) => {
+      const row = document.createElement("div");
+      row.className = "phraseRow";
+
+      const input = document.createElement("input");
+      input.className = "input phraseInput";
+      input.type = "text";
+      input.placeholder = "Add phrase";
+      input.value = phrase.text ?? "";
+      input.addEventListener("change", async () => {
+        action.activePhrases[phraseIndex].text = input.value;
+        await saveState();
+        render();
+      });
+
+      const caseToggle = document.createElement("button");
+      caseToggle.className = "btn toggle small" + (phrase.caseSensitive ? " active" : "");
+      caseToggle.type = "button";
+      caseToggle.textContent = phrase.caseSensitive ? "Case" : "iCase";
+      caseToggle.addEventListener("click", async () => {
+        action.activePhrases[phraseIndex].caseSensitive = !action.activePhrases[phraseIndex].caseSensitive;
+        await saveState();
+        render();
+      });
+
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "iconBtn small";
+      removeBtn.type = "button";
+      removeBtn.innerHTML = iconDelete();
+      removeBtn.addEventListener("click", async () => {
+        action.activePhrases.splice(phraseIndex, 1);
+        if (!action.activePhrases.length) {
+          action.activePhrases.push({ text: "", caseSensitive: false });
+        }
+        await saveState();
+        render();
+      });
+
+      row.appendChild(input);
+      row.appendChild(caseToggle);
+      row.appendChild(removeBtn);
+      activeList.appendChild(row);
+    });
+
+    const addActiveBtn = document.createElement("button");
+    addActiveBtn.className = "btn small";
+    addActiveBtn.type = "button";
+    addActiveBtn.textContent = "Add phrase";
+    addActiveBtn.addEventListener("click", async () => {
+      action.activePhrases.push({ text: "", caseSensitive: false });
+      await saveState();
+      render();
+    });
+
+    activeSection.appendChild(activeLabel);
+    activeSection.appendChild(activeList);
+    activeSection.appendChild(addActiveBtn);
+
+    const failureSection = document.createElement("div");
+    failureSection.className = "phraseSection";
+    const failureLabel = document.createElement("div");
+    failureLabel.className = "pill";
+    failureLabel.textContent = "Detect failures (report only)";
+    const failureList = document.createElement("div");
+    failureList.className = "phraseList";
+
+    const failurePhrases = normalizePhraseList(action.failurePhrases, DEFAULT_FAILURE_PHRASES);
+    if (!failurePhrases.length) failurePhrases.push({ text: "", caseSensitive: false });
+    action.failurePhrases = failurePhrases;
+
+    failurePhrases.forEach((phrase, phraseIndex) => {
+      const row = document.createElement("div");
+      row.className = "phraseRow";
+
+      const input = document.createElement("input");
+      input.className = "input phraseInput";
+      input.type = "text";
+      input.placeholder = "Add phrase";
+      input.value = phrase.text ?? "";
+      input.addEventListener("change", async () => {
+        action.failurePhrases[phraseIndex].text = input.value;
+        await saveState();
+        render();
+      });
+
+      const caseToggle = document.createElement("button");
+      caseToggle.className = "btn toggle small" + (phrase.caseSensitive ? " active" : "");
+      caseToggle.type = "button";
+      caseToggle.textContent = phrase.caseSensitive ? "Case" : "iCase";
+      caseToggle.addEventListener("click", async () => {
+        action.failurePhrases[phraseIndex].caseSensitive = !action.failurePhrases[phraseIndex].caseSensitive;
+        await saveState();
+        render();
+      });
+
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "iconBtn small";
+      removeBtn.type = "button";
+      removeBtn.innerHTML = iconDelete();
+      removeBtn.addEventListener("click", async () => {
+        action.failurePhrases.splice(phraseIndex, 1);
+        if (!action.failurePhrases.length) {
+          action.failurePhrases.push({ text: "", caseSensitive: false });
+        }
+        await saveState();
+        render();
+      });
+
+      row.appendChild(input);
+      row.appendChild(caseToggle);
+      row.appendChild(removeBtn);
+      failureList.appendChild(row);
+    });
+
+    const addFailureBtn = document.createElement("button");
+    addFailureBtn.className = "btn small";
+    addFailureBtn.type = "button";
+    addFailureBtn.textContent = "Add phrase";
+    addFailureBtn.addEventListener("click", async () => {
+      action.failurePhrases.push({ text: "", caseSensitive: false });
+      await saveState();
+      render();
+    });
+
+    failureSection.appendChild(failureLabel);
+    failureSection.appendChild(failureList);
+    failureSection.appendChild(addFailureBtn);
+
+    const settingsRow = document.createElement("div");
+    settingsRow.className = "row";
+
+    const thresholdLabel = document.createElement("div");
+    thresholdLabel.className = "pill";
+    thresholdLabel.textContent = "Max concurrent active jobs";
+    const thresholdInput = document.createElement("input");
+    thresholdInput.className = "input";
+    thresholdInput.type = "number";
+    thresholdInput.min = "1";
+    thresholdInput.step = "1";
+    thresholdInput.style.width = "120px";
+    thresholdInput.value = String(action.threshold ?? DEFAULT_HIGGSFIELD_CONFIG.threshold);
+    thresholdInput.addEventListener("change", async () => {
+      const v = Number(thresholdInput.value);
+      action.threshold = Number.isFinite(v) && v > 0 ? Math.round(v) : DEFAULT_HIGGSFIELD_CONFIG.threshold;
+      await saveState();
+      render();
+    });
+
+    const highlightLabel = document.createElement("div");
+    highlightLabel.className = "pill";
+    highlightLabel.textContent = "Highlight detected phrases";
+    const highlightToggle = document.createElement("button");
+    highlightToggle.className = "btn toggle" + (action.highlight !== false ? " active" : "");
+    highlightToggle.type = "button";
+    highlightToggle.textContent = action.highlight !== false ? "On" : "Off";
+    highlightToggle.addEventListener("click", async () => {
+      action.highlight = !(action.highlight !== false);
+      await saveState();
+      render();
+    });
+
+    settingsRow.appendChild(thresholdLabel);
+    settingsRow.appendChild(thresholdInput);
+    settingsRow.appendChild(highlightLabel);
+    settingsRow.appendChild(highlightToggle);
+
+    const timingRow = document.createElement("div");
+    timingRow.className = "row";
+
+    const pollLabel = document.createElement("div");
+    pollLabel.className = "pill";
+    pollLabel.textContent = "Poll interval (sec)";
+    const pollInput = document.createElement("input");
+    pollInput.className = "input";
+    pollInput.type = "number";
+    pollInput.min = "0.2";
+    pollInput.step = "0.1";
+    pollInput.style.width = "120px";
+    pollInput.value = String(action.pollIntervalSec ?? DEFAULT_HIGGSFIELD_CONFIG.pollIntervalSec);
+    pollInput.addEventListener("change", async () => {
+      const v = Number(pollInput.value);
+      action.pollIntervalSec = Number.isFinite(v) && v >= 0.2 ? v : DEFAULT_HIGGSFIELD_CONFIG.pollIntervalSec;
+      await saveState();
+      render();
+    });
+
+    const timeoutLabel = document.createElement("div");
+    timeoutLabel.className = "pill";
+    timeoutLabel.textContent = "Timeout (sec)";
+    const timeoutInput = document.createElement("input");
+    timeoutInput.className = "input";
+    timeoutInput.type = "number";
+    timeoutInput.min = "0";
+    timeoutInput.step = "10";
+    timeoutInput.style.width = "120px";
+    timeoutInput.value = String(action.timeoutSec ?? DEFAULT_HIGGSFIELD_CONFIG.timeoutSec);
+    timeoutInput.addEventListener("change", async () => {
+      const v = Number(timeoutInput.value);
+      action.timeoutSec = Number.isFinite(v) && v >= 0 ? v : DEFAULT_HIGGSFIELD_CONFIG.timeoutSec;
+      await saveState();
+      render();
+    });
+
+    const maxLabel = document.createElement("div");
+    maxLabel.className = "pill";
+    maxLabel.textContent = "Max highlights";
+    const maxInput = document.createElement("input");
+    maxInput.className = "input";
+    maxInput.type = "number";
+    maxInput.min = "0";
+    maxInput.step = "1";
+    maxInput.style.width = "120px";
+    maxInput.value = String(action.maxHighlights ?? DEFAULT_HIGGSFIELD_CONFIG.maxHighlights);
+    maxInput.addEventListener("change", async () => {
+      const v = Number(maxInput.value);
+      action.maxHighlights = Number.isFinite(v) && v >= 0 ? Math.round(v) : DEFAULT_HIGGSFIELD_CONFIG.maxHighlights;
+      await saveState();
+      render();
+    });
+
+    timingRow.appendChild(pollLabel);
+    timingRow.appendChild(pollInput);
+    timingRow.appendChild(timeoutLabel);
+    timingRow.appendChild(timeoutInput);
+    timingRow.appendChild(maxLabel);
+    timingRow.appendChild(maxInput);
+
+    left.appendChild(activeSection);
+    left.appendChild(failureSection);
+    left.appendChild(settingsRow);
+    left.appendChild(timingRow);
+  }
+
   const del2 = document.createElement("button");
   del2.className = "deleteBtn";
   del2.setAttribute("aria-label", "Delete action");
@@ -1835,6 +2190,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     runState.currentId = null;
     runState.doneIds = new Set();
     runState.checkResults = new Map();
+    runState.higgsfieldStatus = new Map();
     render();
   }
 
@@ -1852,6 +2208,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "FLOW_END") {
     runState.status = "idle";
     runState.currentId = null;
+    runState.higgsfieldStatus = new Map();
     render();
     showStatus("✅ Flow complete");
   }
@@ -1870,6 +2227,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     runState.status = "idle";
     runState.currentId = null;
     runState.doneIds = new Set();
+    runState.higgsfieldStatus = new Map();
     render();
     showStatus("⏹️ Flow stopped");
   }
@@ -1877,6 +2235,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "FLOW_ERROR") {
     runState.status = "idle";
     runState.currentId = null;
+    runState.higgsfieldStatus = new Map();
     render();
     showStatus("❌ Flow error: " + msg.error, 3500);
   }
@@ -1903,6 +2262,18 @@ chrome.runtime.onMessage.addListener((msg) => {
         cellRef: msg.cellRef,
         expected: msg.expected,
         actual: msg.actual
+      });
+      render();
+    }
+  }
+
+  if (msg?.type === "HIGGSFIELD_STATUS") {
+    if (msg.actionId) {
+      runState.higgsfieldStatus.set(msg.actionId, {
+        activeCount: msg.activeCount ?? 0,
+        failedCount: msg.failedCount ?? 0,
+        threshold: msg.threshold ?? DEFAULT_HIGGSFIELD_CONFIG.threshold,
+        waiting: msg.waiting === true
       });
       render();
     }

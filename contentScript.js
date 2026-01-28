@@ -1,9 +1,16 @@
 (() => {
   const POINTER_ID = "autoline-pointer";
   const PREVIEW_ID = "autoline-click-preview";
+  const PHRASE_OVERLAY_ID = "autoline-phrase-overlay";
   const STYLE_ID = "autoline-overlay-style";
   const RECORDING_CLASS = "autoline-recording";
   let pendingRecord = null;
+  let phraseMonitor = {
+    config: null,
+    highlight: false,
+    rescanTimer: null,
+    listenersActive: false
+  };
   let pointerState = {
     visible: false,
     x: 0,
@@ -52,6 +59,23 @@
       }
       #${PREVIEW_ID}.autoline-fade {
         animation: autolineFadeOut 2s ease-in-out forwards;
+      }
+      #${PHRASE_OVERLAY_ID} {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 2147483645;
+      }
+      #${PHRASE_OVERLAY_ID} .autoline-phrase {
+        position: fixed;
+        border: 2px solid rgba(59, 130, 246, 0.9);
+        border-radius: 8px;
+        box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.2);
+        animation: autolinePulse 1s ease-in-out infinite;
+      }
+      #${PHRASE_OVERLAY_ID} .autoline-phrase.failed {
+        border-color: rgba(239, 68, 68, 0.9);
+        box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.2);
       }
       #${POINTER_ID} {
         position: fixed;
@@ -670,6 +694,185 @@
     return { ok: true, cellRef, value };
   }
 
+  function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function ensurePhraseOverlay() {
+    let overlay = document.getElementById(PHRASE_OVERLAY_ID);
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = PHRASE_OVERLAY_ID;
+      document.body.appendChild(overlay);
+    }
+    return overlay;
+  }
+
+  function clearPhraseHighlights() {
+    const overlay = document.getElementById(PHRASE_OVERLAY_ID);
+    if (overlay) overlay.remove();
+  }
+
+  function schedulePhraseRescan() {
+    if (!phraseMonitor.highlight || !phraseMonitor.config) return;
+    if (phraseMonitor.rescanTimer) return;
+    phraseMonitor.rescanTimer = window.setTimeout(() => {
+      phraseMonitor.rescanTimer = null;
+      scanPageForPhrases(phraseMonitor.config, { silent: true });
+    }, 120);
+  }
+
+  function setPhraseListeners(enabled) {
+    if (enabled && !phraseMonitor.listenersActive) {
+      window.addEventListener("scroll", schedulePhraseRescan, true);
+      window.addEventListener("resize", schedulePhraseRescan, true);
+      phraseMonitor.listenersActive = true;
+      return;
+    }
+    if (!enabled && phraseMonitor.listenersActive) {
+      window.removeEventListener("scroll", schedulePhraseRescan, true);
+      window.removeEventListener("resize", schedulePhraseRescan, true);
+      phraseMonitor.listenersActive = false;
+    }
+  }
+
+  function renderPhraseHighlights(activeRects, failedRects) {
+    if (!activeRects.length && !failedRects.length) {
+      clearPhraseHighlights();
+      return;
+    }
+    const overlay = ensurePhraseOverlay();
+    overlay.innerHTML = "";
+    const appendRect = (rect, isFailed) => {
+      const box = document.createElement("div");
+      box.className = `autoline-phrase${isFailed ? " failed" : ""}`;
+      box.style.left = `${rect.left}px`;
+      box.style.top = `${rect.top}px`;
+      box.style.width = `${rect.width}px`;
+      box.style.height = `${rect.height}px`;
+      overlay.appendChild(box);
+    };
+    activeRects.forEach((rect) => appendRect(rect, false));
+    failedRects.forEach((rect) => appendRect(rect, true));
+  }
+
+  function scanPageForPhrases(config, options = {}) {
+    ensureStyles();
+    const body = document.body;
+    if (!body) return { ok: false, activeCount: 0, failedCount: 0 };
+    const highlight = config.highlight !== false;
+    phraseMonitor.config = { ...config, highlight };
+    phraseMonitor.highlight = highlight;
+    setPhraseListeners(highlight);
+    if (!highlight) {
+      clearPhraseHighlights();
+    }
+
+    const activePhrases = Array.isArray(config.activePhrases) ? config.activePhrases : [];
+    const failurePhrases = Array.isArray(config.failurePhrases) ? config.failurePhrases : [];
+    const maxHighlights = Number.isFinite(config.maxHighlights) ? Math.max(0, config.maxHighlights) : 0;
+    const activeRegexes = activePhrases
+      .map((phrase) => ({
+        phrase,
+        regex: phrase?.text
+          ? new RegExp(escapeRegExp(phrase.text), phrase.caseSensitive ? "g" : "gi")
+          : null
+      }))
+      .filter((entry) => entry.regex);
+    const failureRegexes = failurePhrases
+      .map((phrase) => ({
+        phrase,
+        regex: phrase?.text
+          ? new RegExp(escapeRegExp(phrase.text), phrase.caseSensitive ? "g" : "gi")
+          : null
+      }))
+      .filter((entry) => entry.regex);
+
+    const ignoredTags = new Set(["SCRIPT", "STYLE", "NOSCRIPT"]);
+    let activeCount = 0;
+    let failedCount = 0;
+    const activeRects = [];
+    const failedRects = [];
+    let remainingHighlights = highlight ? maxHighlights : 0;
+
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => {
+        const text = node.nodeValue;
+        if (!text || !text.trim()) return NodeFilter.FILTER_REJECT;
+        const parent = node.parentElement;
+        if (!parent || ignoredTags.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+        const style = window.getComputedStyle(parent);
+        if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+          return NodeFilter.FILTER_REJECT;
+        }
+        const rect = parent.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+
+    let node = walker.nextNode();
+    while (node) {
+      const text = node.nodeValue || "";
+      const collectRects = (start, end, bucket) => {
+        if (remainingHighlights <= 0) return;
+        try {
+          const range = document.createRange();
+          range.setStart(node, start);
+          range.setEnd(node, end);
+          Array.from(range.getClientRects()).forEach((rect) => {
+            if (remainingHighlights <= 0) return;
+            if (rect.width > 0 && rect.height > 0) {
+              bucket.push(rect);
+              remainingHighlights -= 1;
+            }
+          });
+        } catch (e) {}
+      };
+
+      activeRegexes.forEach(({ regex }) => {
+        regex.lastIndex = 0;
+        let match = regex.exec(text);
+        while (match) {
+          const matchText = match[0] || "";
+          if (matchText) {
+            activeCount += 1;
+            if (highlight) {
+              collectRects(match.index, match.index + matchText.length, activeRects);
+            }
+          }
+          match = regex.exec(text);
+        }
+      });
+
+      failureRegexes.forEach(({ regex }) => {
+        regex.lastIndex = 0;
+        let match = regex.exec(text);
+        while (match) {
+          const matchText = match[0] || "";
+          if (matchText) {
+            failedCount += 1;
+            if (highlight) {
+              collectRects(match.index, match.index + matchText.length, failedRects);
+            }
+          }
+          match = regex.exec(text);
+        }
+      });
+
+      node = walker.nextNode();
+    }
+
+    if (highlight) {
+      renderPhraseHighlights(activeRects, failedRects);
+    }
+
+    if (options.silent) {
+      return { ok: true, activeCount, failedCount };
+    }
+    return { ok: true, activeCount, failedCount };
+  }
+
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === "ARM_CLICK_RECORD") {
       ensureStyles();
@@ -809,6 +1012,29 @@
             : insertResult
         );
       })();
+      return true;
+    }
+
+    if (msg?.type === "SCAN_JOB_PHRASES") {
+      const result = scanPageForPhrases(
+        {
+          activePhrases: msg.activePhrases,
+          failurePhrases: msg.failurePhrases,
+          highlight: msg.highlight !== false,
+          maxHighlights: msg.maxHighlights
+        },
+        { silent: false }
+      );
+      sendResponse(result);
+      return true;
+    }
+
+    if (msg?.type === "CLEAR_PHRASE_HIGHLIGHTS") {
+      phraseMonitor.config = null;
+      phraseMonitor.highlight = false;
+      setPhraseListeners(false);
+      clearPhraseHighlights();
+      sendResponse({ ok: true });
       return true;
     }
 
