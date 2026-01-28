@@ -120,6 +120,11 @@
               <div class="nodeName">Sheets Check Value</div>
               <div class="nodeHint">Validate the selected Google Sheets cell value</div>
             </button>
+
+            <button id="addSheetsCopyNode" class="nodeItem">
+              <div class="nodeName">Sheets Copy</div>
+              <div class="nodeHint">Copy the active Google Sheets cell text</div>
+            </button>
           </div>
         </div>
       </div>
@@ -251,6 +256,26 @@
             <div class="formActions">
               <button id="copyWorkflowJsonBtn" class="btn">Copy JSON</button>
               <button id="backToWorkflowsBtn" class="btn primary">Back to list</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sheets Copy Modal -->
+      <div id="sheetsCopyBackdrop" class="backdrop hidden" role="dialog" aria-modal="true">
+        <div class="modal">
+          <div class="modalHeader">
+            <div class="modalTitle">Sheets Copy</div>
+            <button id="closeSheetsCopyBtn" class="iconBtn small" aria-label="Close">
+              <span class="material-icons" aria-hidden="true">close</span>
+            </button>
+          </div>
+          <div class="modalBody">
+            <div id="sheetsCopyCell" class="pill">Active cell: -</div>
+            <div class="copyBox" id="sheetsCopyText"></div>
+            <div class="formActions">
+              <button id="sheetsCopyCancelBtn" class="btn">Cancel</button>
+              <button id="sheetsCopyBtn" class="btn primary">Copy</button>
             </div>
           </div>
         </div>
