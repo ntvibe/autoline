@@ -5,8 +5,15 @@ const chunkDelay = 150;
 const urlSchemeRegex = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 const attachedDebugTabs = new Set();
 const debugLocks = new Map();
-const sheetsCopyRequests = new Map();
 let platformInfoPromise = null;
+const runtimeClipboard = {
+  text: "",
+  meta: {
+    source: null,
+    a1: null,
+    ts: null
+  }
+};
 
 // Open side panel on icon click
 chrome.runtime.onInstalled.addListener(async () => {
@@ -148,26 +155,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       } finally {
         await releaseDebuggerLock(tabId, "read");
       }
-      return;
-    }
-
-    if (msg?.type === "SHEETS_COPY_RESULT") {
-      const requestId = msg.requestId;
-      if (typeof requestId !== "string") {
-        sendResponse({ ok: false, error: "Missing requestId." });
-        return;
-      }
-      const resolver = sheetsCopyRequests.get(requestId);
-      if (resolver) {
-        sheetsCopyRequests.delete(requestId);
-        resolver({
-          ok: msg.ok === true,
-          a1: msg.a1 ?? null,
-          copiedTextLength: Number.isFinite(msg.copiedTextLength) ? msg.copiedTextLength : 0,
-          error: msg.error
-        });
-      }
-      sendResponse({ ok: true });
       return;
     }
 
@@ -458,22 +445,46 @@ async function runFlow(actions, settings, runId) {
           continue;
         }
         const formulaText = typeof result.formulaText === "string" ? result.formulaText : "";
-        const copyResult = await requestSheetsCopyFromSidepanel({
-          a1: result.a1,
-          formulaText
-        });
+        runtimeClipboard.text = formulaText;
+        runtimeClipboard.meta = {
+          source: "sheets",
+          a1: result.a1 ?? null,
+          ts: Date.now()
+        };
         chrome.runtime.sendMessage({
           type: "SHEETS_COPY_STATUS",
           actionId: step.id,
-          success: copyResult?.ok === true,
+          success: true,
           a1: result.a1 ?? null,
-          copiedTextLength:
-            copyResult?.ok === true
-              ? Number.isFinite(copyResult.copiedTextLength)
-                ? copyResult.copiedTextLength
-                : formulaText.length
-              : 0,
-          error: copyResult?.error
+          copiedTextLength: runtimeClipboard.text.length
+        });
+      }
+
+      if (step.type === "sheetsPaste") {
+        const tab = await getActiveTab();
+        if (!tab) throw new Error("No active tab for Sheets paste.");
+        const text = typeof runtimeClipboard.text === "string" ? runtimeClipboard.text : "";
+        if (!text) {
+          chrome.runtime.sendMessage({
+            type: "SHEETS_PASTE_STATUS",
+            actionId: step.id,
+            success: false,
+            error: "runtime clipboard empty",
+            length: 0
+          });
+          continue;
+        }
+        await ensureDebuggerLock(tab.id, "flow");
+        let insertResult = await insertTextViaDebugger(tab.id, text);
+        if (!insertResult?.ok) {
+          insertResult = await sendMessageToTab(tab.id, { type: "INSERT_TEXT_BLOCK", text });
+        }
+        chrome.runtime.sendMessage({
+          type: "SHEETS_PASTE_STATUS",
+          actionId: step.id,
+          success: insertResult?.ok === true,
+          length: text.length,
+          error: insertResult?.ok === true ? null : insertResult?.error || "Unable to paste runtime clipboard."
         });
       }
 
@@ -731,6 +742,15 @@ function sendDebuggerCommand(tabId, method, params) {
   });
 }
 
+async function insertTextViaDebugger(tabId, text) {
+  try {
+    await sendDebuggerCommand(tabId, "Input.insertText", { text });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e?.message || "Unable to insert text." };
+  }
+}
+
 async function performClipboardAction(tabId, mode) {
   if (mode === "paste") {
     return sendMessageToTab(tabId, { type: "CLIPBOARD_PASTE" });
@@ -913,27 +933,4 @@ async function readSheetsCopyViaDebugger(tabId) {
     returnByValue: true
   });
   return result?.result?.value ?? { ok: false, a1: null, formulaText: "" };
-}
-
-async function requestSheetsCopyFromSidepanel({ a1, formulaText }) {
-  const requestId = `sheetsCopy-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const responsePromise = new Promise((resolve) => {
-    sheetsCopyRequests.set(requestId, resolve);
-  });
-  chrome.runtime.sendMessage({
-    type: "SHEETS_COPY_REQUEST",
-    requestId,
-    a1,
-    formulaText
-  });
-  const timeoutMs = 60000;
-  const timeoutPromise = new Promise((resolve) => {
-    setTimeout(() => {
-      if (sheetsCopyRequests.has(requestId)) {
-        sheetsCopyRequests.delete(requestId);
-        resolve({ ok: false, a1: a1 || null, copiedTextLength: 0, error: "Sheets copy timed out." });
-      }
-    }, timeoutMs);
-  });
-  return Promise.race([responsePromise, timeoutPromise]);
 }
