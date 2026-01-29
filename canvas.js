@@ -752,39 +752,6 @@ function renderSidebar() {
     nodeOptions.appendChild(optionsCard);
   }
 
-  if (node.kind !== "end") {
-    const connectCard = document.createElement("div");
-    connectCard.className = "optionsCard";
-    const label = document.createElement("div");
-    label.className = "nodeTag";
-    label.textContent = "Connection";
-    const select = document.createElement("select");
-    const optionNone = document.createElement("option");
-    optionNone.value = "";
-    optionNone.textContent = "Disconnect";
-    select.appendChild(optionNone);
-
-    canvasState.nodes.forEach((candidate) => {
-      if (candidate.id === node.id || candidate.kind === "start") return;
-      const option = document.createElement("option");
-      option.value = candidate.id;
-      option.textContent = `${candidate.kind === "action" ? candidate.label : candidate.label}`;
-      select.appendChild(option);
-    });
-
-    const existing = getOutgoingConnection(node.id);
-    select.value = existing?.to ?? "";
-    select.addEventListener("change", async () => {
-      connectNodes(node.id, select.value || null);
-      await saveCanvasState();
-      render();
-    });
-
-    connectCard.appendChild(label);
-    connectCard.appendChild(select);
-    nodeOptions.appendChild(connectCard);
-  }
-
   if (node.kind === "action") {
     const actionsCard = document.createElement("div");
     actionsCard.className = "optionsCard";
@@ -955,10 +922,27 @@ function renderNodeOptionsContent(container, node, compact) {
   }
 
   if (action.type === "keyboard") {
-    const keyRow = createOptionRow("Key", "text", action.key ?? "ctrlA", (val) => {
-      action.key = val;
-      persistAndRender();
-    });
+    const keyRow = createSelectRow(
+      "Key command",
+      [
+        { value: "ctrlA", label: "Ctrl + A (Select all)" },
+        { value: "ctrlC", label: "Ctrl + C (Copy)" },
+        { value: "ctrlV", label: "Ctrl + V (Paste)" },
+        { value: "delete", label: "Delete" },
+        { value: "backspace", label: "Backspace" },
+        { value: "arrowUp", label: "Arrow Up" },
+        { value: "arrowDown", label: "Arrow Down" },
+        { value: "arrowLeft", label: "Arrow Left" },
+        { value: "arrowRight", label: "Arrow Right" },
+        { value: "enter", label: "Enter" },
+        { value: "escape", label: "Esc" }
+      ],
+      action.key ?? "ctrlA",
+      (val) => {
+        action.key = val;
+        persistAndRender();
+      }
+    );
     const pressRow = createOptionRow("Press count", "number", action.pressCount ?? 1, (val) => {
       action.pressCount = Number(val) || 1;
       persistAndRender();
@@ -1143,23 +1127,16 @@ function updateRunnerAnimation(fromNode, toNode) {
   cancelAnimationFrame(animationFrame);
   canvasRunner.innerHTML = "";
 
-  const fromEl = canvasNodes.querySelector(`.nodeCard[data-node-id="${fromNode.id}"]`);
-  const toEl = canvasNodes.querySelector(`.nodeCard[data-node-id="${toNode.id}"]`);
-  if (!fromEl || !toEl) return;
+  const start = getConnectorPosition(fromNode.id, "out");
+  const end = getConnectorPosition(toNode.id, "in");
+  if (!start || !end) return;
 
-  const fromRect = fromEl.getBoundingClientRect();
-  const toRect = toEl.getBoundingClientRect();
-  const viewportRect = canvasInner.getBoundingClientRect();
-  const zoom = canvasState.settings.zoom ?? 1;
-
-  const start = {
-    x: (fromRect.left - viewportRect.left + fromRect.width / 2) / zoom,
-    y: (fromRect.top - viewportRect.top + fromRect.height / 2) / zoom
-  };
-  const end = {
-    x: (toRect.left - viewportRect.left + toRect.width / 2) / zoom,
-    y: (toRect.top - viewportRect.top + toRect.height / 2) / zoom
-  };
+  const { d } = getConnectionPathDefinition(start, end);
+  const motionPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  motionPath.setAttribute("d", d);
+  motionPath.setAttribute("fill", "none");
+  motionPath.setAttribute("stroke", "none");
+  canvasRunner.appendChild(motionPath);
 
   const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
   circle.setAttribute("r", "6");
@@ -1168,11 +1145,13 @@ function updateRunnerAnimation(fromNode, toNode) {
 
   const duration = canvasState.settings.runSpeedMs ?? 800;
   const startTime = performance.now();
+  const length = motionPath.getTotalLength();
 
   function step(timestamp) {
     const progress = Math.min(1, (timestamp - startTime) / duration);
-    const x = start.x + (end.x - start.x) * progress;
-    const y = start.y + (end.y - start.y) * progress;
+    const point = motionPath.getPointAtLength(length * progress);
+    const x = point.x;
+    const y = point.y;
     circle.setAttribute("cx", String(x));
     circle.setAttribute("cy", String(y));
     if (progress < 1) {
@@ -1208,14 +1187,23 @@ function getConnectorPosition(nodeId, side) {
 
 function createConnectionPath(start, end, className) {
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  const dx = Math.max(80, Math.abs(end.x - start.x) * 0.5);
-  const curve = end.x >= start.x ? dx : -dx;
-  const c1x = start.x + curve;
-  const c2x = end.x - curve;
-  const d = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
+  const { d } = getConnectionPathDefinition(start, end);
   path.setAttribute("d", d);
   path.setAttribute("class", className);
   return path;
+}
+
+function getConnectionPathDefinition(start, end) {
+  const deltaX = end.x - start.x;
+  const absDeltaX = Math.abs(deltaX);
+  const minCurve = 120;
+  const curveMagnitude = Math.max(minCurve, absDeltaX * 0.5);
+  const direction = absDeltaX < 30 ? 1 : Math.sign(deltaX) || 1;
+  const curve = curveMagnitude * direction;
+  const c1x = start.x + curve;
+  const c2x = end.x - curve;
+  const d = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
+  return { d, c1x, c2x };
 }
 
 function startConnectionDrag(nodeId, side, event) {
@@ -1478,6 +1466,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     const fromNode = getNodeByActionId(msg.actionId);
     const outgoing = fromNode ? getOutgoingConnection(fromNode.id) : null;
     const toNode = outgoing ? getNodeById(outgoing.to) : null;
+    runState.currentActionId = null;
     render();
     if (fromNode && toNode) {
       updateRunnerAnimation(fromNode, toNode);
