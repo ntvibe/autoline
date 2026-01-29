@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Autoline",
-  "version": "0.1.2",
-  "description": "Side-panel automation nodes",
+  "name": "Autoline Canvas",
+  "version": "0.1.3",
+  "description": "Canvas-first automation nodes",
   "permissions": ["tabs", "storage", "sidePanel", "scripting", "debugger", "clipboardRead", "clipboardWrite"],
   "host_permissions": ["<all_urls>"],
   "background": {
@@ -10,7 +10,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Autoline"
+    "default_title": "Autoline Canvas"
   },
   "side_panel": {
     "default_path": "sidepanel.html"

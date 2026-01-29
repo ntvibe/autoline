@@ -217,6 +217,7 @@ body {
 .nodeCard.running {
   border-color: var(--accent);
   box-shadow: 0 0 18px rgba(61, 213, 152, 0.45);
+  animation: pulseGlow 1.2s ease-in-out infinite;
 }
 
 .nodeCard.selected {
@@ -349,6 +350,18 @@ body {
   }
   100% {
     stroke-dashoffset: -72;
+  }
+}
+
+@keyframes pulseGlow {
+  0% {
+    box-shadow: 0 0 10px rgba(61, 213, 152, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(61, 213, 152, 0.6);
+  }
+  100% {
+    box-shadow: 0 0 10px rgba(61, 213, 152, 0.2);
   }
 }
 
