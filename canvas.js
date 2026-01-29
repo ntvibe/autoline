@@ -1514,8 +1514,11 @@ function createConnectionPath(start, end, className) {
 }
 
 function getConnectionPathDefinition(start, end) {
-  const midX = (start.x + end.x) / 2;
-  const d = `M ${start.x} ${start.y} L ${midX} ${start.y} L ${midX} ${end.y} L ${end.x} ${end.y}`;
+  const deltaX = Math.max(80, Math.abs(end.x - start.x) * 0.5);
+  const direction = end.x >= start.x ? 1 : -1;
+  const control1X = start.x + direction * deltaX;
+  const control2X = end.x - direction * deltaX;
+  const d = `M ${start.x} ${start.y} C ${control1X} ${start.y}, ${control2X} ${end.y}, ${end.x} ${end.y}`;
   return { d };
 }
 

@@ -229,12 +229,28 @@ async function runFlow(actions, settings, runId) {
   let flowTabId = null;
   let loopIndex = 0;
 
+  async function getFlowTab() {
+    if (flowTabId) {
+      try {
+        return await chrome.tabs.get(flowTabId);
+      } catch (e) {
+        flowTabId = null;
+      }
+    }
+    const activeTab = await getActiveTab();
+    if (activeTab?.id) {
+      flowTabId = activeTab.id;
+      await ensureDebuggerLock(flowTabId, "flow");
+    }
+    return activeTab;
+  }
+
   try {
     let shouldLoop = true;
     while (shouldLoop) {
       if (!isActiveRun(runId)) return;
       chrome.runtime.sendMessage({ type: "FLOW_START" });
-      const activeTab = await getActiveTab();
+      const activeTab = await getFlowTab();
       if (activeTab?.id) {
         flowTabId = activeTab.id;
         await ensureDebuggerLock(flowTabId, "flow");
@@ -272,13 +288,13 @@ async function runFlow(actions, settings, runId) {
       if (step.type === "openUrl") {
         const url = normalizeUrl(step.url);
         if (!url) throw new Error("Open URL node missing a URL.");
-        const tab = await getActiveTab();
+        const tab = await getFlowTab();
         if (!tab) throw new Error("No active tab to navigate.");
         await chrome.tabs.update(tab.id, { url });
       }
 
       if (step.type === "click") {
-        const tab = await getActiveTab();
+        const tab = await getFlowTab();
         if (!tab) throw new Error("No active tab to click.");
         const resolved = await resolveClickTarget(tab.id, step);
         if (!resolved?.ok) throw new Error("Click target not found on the page.");
@@ -343,7 +359,7 @@ async function runFlow(actions, settings, runId) {
       }
 
       if (step.type === "reloadTab") {
-        const tab = await getActiveTab();
+        const tab = await getFlowTab();
         if (!tab) throw new Error("No active tab to reload.");
         await chrome.tabs.reload(tab.id);
       }
@@ -353,7 +369,7 @@ async function runFlow(actions, settings, runId) {
       }
 
       if (step.type === "textBlocks") {
-        const tab = await getActiveTab();
+        const tab = await getFlowTab();
         if (!tab) throw new Error("No active tab for Text Blocks action.");
         const blocks = Array.isArray(step.blocks) ? step.blocks : [];
         const nextIndex = blocks.findIndex((block) => block?.enabled !== false);
@@ -371,7 +387,7 @@ async function runFlow(actions, settings, runId) {
       }
 
       if (step.type === "clipboard") {
-        const tab = await getActiveTab();
+        const tab = await getFlowTab();
         if (!tab) throw new Error("No active tab for clipboard action.");
         const mode = step.mode === "paste" ? "paste" : "copy";
         let clipboardResult = await performClipboardAction(tab.id, mode);
@@ -409,7 +425,7 @@ async function runFlow(actions, settings, runId) {
       }
 
       if (step.type === "keyboard") {
-        const tab = await getActiveTab();
+        const tab = await getFlowTab();
         if (!tab) throw new Error("No active tab for keyboard action.");
         await ensureDebuggerLock(tab.id, "flow");
         const keySpec = await getKeySpec(step.key);
@@ -430,7 +446,7 @@ async function runFlow(actions, settings, runId) {
       }
 
       if (step.type === "higgsfieldAi") {
-        const tab = await getActiveTab();
+        const tab = await getFlowTab();
         if (!tab) throw new Error("No active tab for Higgsfield AI.");
         const activePhrases = normalizePhraseList(step.activePhrases, DEFAULT_ACTIVE_PHRASES);
         if (!activePhrases.length) {
@@ -488,7 +504,7 @@ async function runFlow(actions, settings, runId) {
       }
 
       if (step.type === "sheetsCheckValue") {
-        const tab = await getActiveTab();
+        const tab = await getFlowTab();
         if (!tab) throw new Error("No active tab for Sheets check.");
         await ensureDebuggerLock(tab.id, "flow");
         const result = await readSheetsSelectionViaDebugger(tab.id);
@@ -515,7 +531,7 @@ async function runFlow(actions, settings, runId) {
       }
 
       if (step.type === "sheetsCopy") {
-        const tab = await getActiveTab();
+        const tab = await getFlowTab();
         if (!tab) throw new Error("No active tab for Sheets copy.");
         await ensureDebuggerLock(tab.id, "flow");
         const result = await readSheetsCopyViaDebugger(tab.id);
@@ -547,7 +563,7 @@ async function runFlow(actions, settings, runId) {
       }
 
       if (step.type === "sheetsPaste") {
-        const tab = await getActiveTab();
+        const tab = await getFlowTab();
         if (!tab) throw new Error("No active tab for Sheets paste.");
         const text = typeof runtimeClipboard.text === "string" ? runtimeClipboard.text : "";
         if (!text) {
@@ -580,7 +596,7 @@ async function runFlow(actions, settings, runId) {
       if (i !== actions.length - 1 && globalDelayMs > 0) {
         const nextStep = actions[i + 1];
         if (step.type === "click" && nextStep?.type === "click") {
-          const tab = await getActiveTab();
+          const tab = await getFlowTab();
           if (tab) {
             const nextResolved = await ensureClickVisible(tab.id, nextStep);
             if (nextResolved) {
@@ -606,10 +622,10 @@ async function runFlow(actions, settings, runId) {
 
     if (!isActiveRun(runId)) return;
     chrome.runtime.sendMessage({ type: "FLOW_END" });
-    const active = await getActiveTab();
-    if (active) {
-      await sendMessageToTab(active.id, { type: "POINTER_HIDE" });
-      await sendMessageToTab(active.id, { type: "CLEAR_PHRASE_HIGHLIGHTS" });
+    const cleanupTab = flowTabId ? await getFlowTab() : await getActiveTab();
+    if (cleanupTab) {
+      await sendMessageToTab(cleanupTab.id, { type: "POINTER_HIDE" });
+      await sendMessageToTab(cleanupTab.id, { type: "CLEAR_PHRASE_HIGHLIGHTS" });
     }
     runController.running = false;
   } finally {
