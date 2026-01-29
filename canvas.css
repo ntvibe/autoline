@@ -122,6 +122,11 @@ body {
   cursor: pointer;
 }
 
+.iconBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .iconBtn.small {
   width: 28px;
   height: 28px;
@@ -234,6 +239,15 @@ body {
 .canvasNodes {
   position: absolute;
   inset: 0;
+}
+
+.selectionRect {
+  position: absolute;
+  border: 1px dashed rgba(var(--accent-rgb), 0.7);
+  background: rgba(var(--accent-rgb), 0.12);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 3;
 }
 
 .nodeCard {

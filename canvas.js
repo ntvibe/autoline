@@ -1,4 +1,5 @@
 const canvasPlayBtn = document.getElementById("canvasPlayBtn");
+const canvasRunFromBtn = document.getElementById("canvasRunFromBtn");
 const canvasPauseBtn = document.getElementById("canvasPauseBtn");
 const canvasStopBtn = document.getElementById("canvasStopBtn");
 const canvasSettingsBtn = document.getElementById("canvasSettingsBtn");
@@ -80,8 +81,10 @@ let canvasState = {
 
 let workflows = [];
 let selectedNodeId = null;
+let selectedNodeIds = new Set();
 let dragState = null;
 let panState = null;
+let selectionState = null;
 let connectionDrag = null;
 let snapTarget = null;
 let workflowMode = "open";
@@ -93,6 +96,9 @@ let runState = {
 let animationFrame = null;
 let ignoreStorageUpdate = false;
 let zoomSaveTimer = null;
+let selectionRect = null;
+let runnerTimeout = null;
+let suppressCanvasClick = false;
 
 function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
@@ -569,14 +575,35 @@ function renderAddNodeList() {
   });
 }
 
+function updateCanvasBounds() {
+  const minWidth = 6000;
+  const minHeight = 3600;
+  const padding = 1200;
+  if (!canvasState.nodes.length) {
+    canvasInner.style.width = `${minWidth}px`;
+    canvasInner.style.height = `${minHeight}px`;
+    return;
+  }
+  const xs = canvasState.nodes.map((node) => node.position?.x ?? 0);
+  const ys = canvasState.nodes.map((node) => node.position?.y ?? 0);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+  const width = Math.max(minWidth, maxX + padding);
+  const height = Math.max(minHeight, maxY + padding);
+  canvasInner.style.width = `${width}px`;
+  canvasInner.style.height = `${height}px`;
+}
+
 function render() {
   workflowNameInput.value = canvasState.workflowName || "Workflow";
   applyTheme(canvasState.settings.themeMode ?? "auto");
   applyZoom(canvasState.settings.zoom ?? 1);
 
+  updateCanvasBounds();
   renderNodes();
   renderConnections();
   renderSidebar();
+  updateRunFromButtonState();
 }
 
 function renderNodes() {
@@ -589,7 +616,7 @@ function renderNodes() {
     nodeEl.style.left = `${node.position?.x ?? 0}px`;
     nodeEl.style.top = `${node.position?.y ?? 0}px`;
     if (node.expanded) nodeEl.classList.add("expanded");
-    if (selectedNodeId === node.id) nodeEl.classList.add("selected");
+    if (selectedNodeIds.has(node.id)) nodeEl.classList.add("selected");
     if (node.action?.id && runState.currentActionId === node.action.id) nodeEl.classList.add("running");
 
     const header = document.createElement("div");
@@ -665,22 +692,8 @@ function renderNodes() {
       body.innerHTML = `<div class="nodeTag">${node.kind === "start" ? "Starting point" : "Ending point"}</div>`;
     }
 
-    const footer = document.createElement("div");
-    footer.className = "nodeFooter";
-    if (node.kind === "action") {
-      const runBtn = document.createElement("button");
-      runBtn.className = "btn";
-      runBtn.textContent = "Run from here";
-      runBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        runFromNode(node.id);
-      });
-      footer.appendChild(runBtn);
-    }
-
     nodeEl.appendChild(header);
     nodeEl.appendChild(body);
-    nodeEl.appendChild(footer);
 
     const inConnector = document.createElement("div");
     inConnector.className = "nodeConnector in";
@@ -717,10 +730,19 @@ function renderNodes() {
       e.stopPropagation();
     });
 
-    nodeEl.addEventListener("click", () => {
-      selectedNodeId = node.id;
+    nodeEl.addEventListener("click", (e) => {
+      if (e.shiftKey) {
+        if (selectedNodeIds.has(node.id)) {
+          selectedNodeIds.delete(node.id);
+        } else {
+          selectedNodeIds.add(node.id);
+        }
+        setSelectedNodes(selectedNodeIds);
+      } else {
+        setSelectedNodes([node.id]);
+      }
       renderSidebar();
-      render();
+      renderNodes();
     });
 
     canvasNodes.appendChild(nodeEl);
@@ -751,6 +773,11 @@ function renderConnections() {
 }
 
 function renderSidebar() {
+  if (selectedNodeIds.size > 1) {
+    sidebarSubtitle.textContent = `${selectedNodeIds.size} nodes selected`;
+    nodeOptions.innerHTML = "<div class=\"nodeTag\">Multiple nodes selected. Choose a single node to edit options.</div>";
+    return;
+  }
   const node = selectedNodeId ? getNodeById(selectedNodeId) : null;
   if (!node) {
     sidebarSubtitle.textContent = "Select a node";
@@ -890,6 +917,55 @@ function truncate(text, max = 24) {
   return `${value.slice(0, max - 1)}…`;
 }
 
+function updateRunFromButtonState() {
+  if (!canvasRunFromBtn) return;
+  const node = selectedNodeId ? getNodeById(selectedNodeId) : null;
+  const canRun = node && node.kind !== "end";
+  canvasRunFromBtn.disabled = !canRun;
+}
+
+function setSelectedNodes(ids) {
+  selectedNodeIds = new Set(ids);
+  if (selectedNodeIds.size === 1) {
+    selectedNodeId = Array.from(selectedNodeIds)[0];
+  } else {
+    selectedNodeId = null;
+  }
+  updateRunFromButtonState();
+}
+
+function clearSelection() {
+  setSelectedNodes([]);
+}
+
+function updateNodeSummary(node) {
+  if (!node) return;
+  const nodeEl = canvasNodes.querySelector(`.nodeCard[data-node-id="${node.id}"]`);
+  if (!nodeEl) return;
+  const titleEl = nodeEl.querySelector(".nodeTitle");
+  const subEl = nodeEl.querySelector(".nodeSub");
+  if (titleEl) {
+    titleEl.textContent = node.kind === "action" ? getActionTitle(node.action) : node.label;
+  }
+  if (subEl) {
+    subEl.textContent =
+      node.kind === "action" ? getActionSummary(node.action) : node.kind === "start" ? "Start of the flow" : "End of the flow";
+  }
+}
+
+function persistNodeEdit(node, compact, { render: forceRender } = {}) {
+  saveCanvasState();
+  const shouldRender = forceRender === true;
+  if (shouldRender) {
+    render();
+    return;
+  }
+  updateNodeSummary(node);
+  if (compact && selectedNodeId === node.id) {
+    renderSidebar();
+  }
+}
+
 async function duplicateNode(nodeId) {
   const node = getNodeById(nodeId);
   if (!node || node.kind !== "action") return;
@@ -905,20 +981,13 @@ async function duplicateNode(nodeId) {
     expanded: node.expanded
   };
   canvasState.nodes.push(newNode);
-  const outgoing = getOutgoingConnection(nodeId);
-  connectNodes(nodeId, newNode.id);
-  if (outgoing) {
-    connectNodes(newNode.id, outgoing.to);
-  } else {
-    const endNode = getEndNode();
-    if (endNode) connectNodes(newNode.id, endNode.id);
-  }
   await saveCanvasState();
 }
 
 function renderNodeOptionsContent(container, node, compact) {
   if (!node.action) return;
   const action = node.action;
+  const commit = (forceRender = false) => persistNodeEdit(node, compact, { render: forceRender });
 
   const title = document.createElement("div");
   title.className = "nodeTag";
@@ -928,7 +997,7 @@ function renderNodeOptionsContent(container, node, compact) {
   if (action.type === "delay") {
     const row = createOptionRow("Delay (sec)", "number", action.delaySec ?? 1, (val) => {
       action.delaySec = Number(val) || 1;
-      persistAndRender();
+      commit();
     });
     container.appendChild(row);
   }
@@ -936,7 +1005,7 @@ function renderNodeOptionsContent(container, node, compact) {
   if (action.type === "openUrl") {
     const row = createOptionRow("URL", "text", action.url ?? "", (val) => {
       action.url = val;
-      persistAndRender();
+      commit();
     });
     container.appendChild(row);
   }
@@ -957,7 +1026,8 @@ function renderNodeOptionsContent(container, node, compact) {
       const tab = tabs?.[0];
       if (tab) {
         action.tab = { tabId: tab.id, title: tab.title, url: tab.url };
-        persistAndRender();
+        info.textContent = action.tab?.title ? action.tab.title : "No tab selected";
+        commit();
       }
     });
     row.appendChild(label);
@@ -994,11 +1064,11 @@ function renderNodeOptionsContent(container, node, compact) {
   if (action.type === "simpleLoop") {
     const enabledRow = createToggleRow("Enabled", action.enabled !== false, (val) => {
       action.enabled = val;
-      persistAndRender();
+      commit();
     });
     const countRow = createOptionRow("Loop count", "number", action.loopCount ?? 1, (val) => {
       action.loopCount = Number(val) || 1;
-      persistAndRender();
+      commit();
     });
     container.appendChild(enabledRow);
     container.appendChild(countRow);
@@ -1015,11 +1085,11 @@ function renderNodeOptionsContent(container, node, compact) {
       textarea.value = block.text ?? "";
       textarea.addEventListener("input", (e) => {
         block.text = e.target.value;
-        persistAndRender();
+        commit();
       });
       const toggle = createToggleRow("Enabled", block.enabled !== false, (val) => {
         block.enabled = val;
-        persistAndRender();
+        commit();
       });
       row.appendChild(label);
       row.appendChild(textarea);
@@ -1032,7 +1102,7 @@ function renderNodeOptionsContent(container, node, compact) {
     addBtn.addEventListener("click", () => {
       action.blocks = Array.isArray(action.blocks) ? action.blocks : [];
       action.blocks.push(createTextBlock(""));
-      persistAndRender();
+      commit(true);
     });
     container.appendChild(addBtn);
   }
@@ -1046,10 +1116,10 @@ function renderNodeOptionsContent(container, node, compact) {
       ],
       action.mode ?? "copy",
       (val) => {
-        action.mode = val;
-        persistAndRender();
-      }
-    );
+      action.mode = val;
+      commit();
+    }
+  );
     container.appendChild(row);
   }
 
@@ -1071,17 +1141,17 @@ function renderNodeOptionsContent(container, node, compact) {
       ],
       action.key ?? "ctrlA",
       (val) => {
-        action.key = val;
-        persistAndRender();
-      }
-    );
+      action.key = val;
+      commit();
+    }
+  );
     const pressRow = createOptionRow("Press count", "number", action.pressCount ?? 1, (val) => {
       action.pressCount = Number(val) || 1;
-      persistAndRender();
+      commit();
     });
     const delayRow = createOptionRow("Delay (sec)", "number", action.delaySec ?? 1, (val) => {
       action.delaySec = Number(val) || 1;
-      persistAndRender();
+      commit();
     });
     container.appendChild(keyRow);
     container.appendChild(pressRow);
@@ -1091,11 +1161,11 @@ function renderNodeOptionsContent(container, node, compact) {
   if (action.type === "sheetsCheckValue") {
     const expectedRow = createOptionRow("Expected value", "text", action.expectedValue ?? "", (val) => {
       action.expectedValue = val;
-      persistAndRender();
+      commit();
     });
     const cellRow = createOptionRow("Cell ref", "text", action.cellRef ?? "", (val) => {
       action.cellRef = val;
-      persistAndRender();
+      commit();
     });
     container.appendChild(expectedRow);
     container.appendChild(cellRow);
@@ -1104,23 +1174,23 @@ function renderNodeOptionsContent(container, node, compact) {
   if (action.type === "higgsfieldAi") {
     const thresholdRow = createOptionRow("Threshold", "number", action.threshold ?? 4, (val) => {
       action.threshold = Number(val) || 4;
-      persistAndRender();
+      commit();
     });
     const highlightRow = createToggleRow("Highlight", action.highlight !== false, (val) => {
       action.highlight = val;
-      persistAndRender();
+      commit();
     });
     const pollRow = createOptionRow("Poll interval (sec)", "number", action.pollIntervalSec ?? 1.5, (val) => {
       action.pollIntervalSec = Number(val) || 1.5;
-      persistAndRender();
+      commit();
     });
     const timeoutRow = createOptionRow("Timeout (sec)", "number", action.timeoutSec ?? 600, (val) => {
       action.timeoutSec = Number(val) || 600;
-      persistAndRender();
+      commit();
     });
     const maxRow = createOptionRow("Max highlights", "number", action.maxHighlights ?? 80, (val) => {
       action.maxHighlights = Number(val) || 80;
-      persistAndRender();
+      commit();
     });
     container.appendChild(thresholdRow);
     container.appendChild(highlightRow);
@@ -1194,7 +1264,10 @@ function deleteNode(nodeId) {
     connectNodes(incoming.from, outgoing.to);
   }
 
-  if (selectedNodeId === nodeId) selectedNodeId = null;
+  if (selectedNodeIds.has(nodeId)) {
+    selectedNodeIds.delete(nodeId);
+    setSelectedNodes(selectedNodeIds);
+  }
 }
 
 async function runFromNode(nodeId) {
@@ -1293,6 +1366,28 @@ function updateRunnerAnimation(fromNode, toNode) {
   animationFrame = requestAnimationFrame(step);
 }
 
+async function getGlobalDelayMs() {
+  const res = await chrome.storage.local.get("autolineState");
+  const settings = res.autolineState?.settings ?? {};
+  return Math.max(0, Number(settings.globalDelaySec ?? 1)) * 1000;
+}
+
+function scheduleRunnerAnimation(fromNode, toNode, delayMs = 0) {
+  if (runnerTimeout) {
+    window.clearTimeout(runnerTimeout);
+    runnerTimeout = null;
+  }
+  if (!fromNode || !toNode) return;
+  if (delayMs > 0) {
+    runnerTimeout = window.setTimeout(() => {
+      updateRunnerAnimation(fromNode, toNode);
+      runnerTimeout = null;
+    }, delayMs);
+  } else {
+    updateRunnerAnimation(fromNode, toNode);
+  }
+}
+
 function applyZoom(zoom) {
   canvasInner.style.transform = `scale(${zoom})`;
 }
@@ -1332,6 +1427,57 @@ function getCanvasPoint(clientX, clientY) {
   };
 }
 
+function updateSelectionRect() {
+  if (!selectionState || !selectionRect) return;
+  const { start, current } = selectionState;
+  const left = Math.min(start.x, current.x);
+  const top = Math.min(start.y, current.y);
+  const width = Math.abs(start.x - current.x);
+  const height = Math.abs(start.y - current.y);
+  selectionRect.style.left = `${left}px`;
+  selectionRect.style.top = `${top}px`;
+  selectionRect.style.width = `${width}px`;
+  selectionRect.style.height = `${height}px`;
+  selectionRect.style.display = "block";
+}
+
+function clearSelectionRect() {
+  if (!selectionRect) return;
+  selectionRect.style.display = "none";
+  selectionRect.style.width = "0";
+  selectionRect.style.height = "0";
+}
+
+function finalizeSelection() {
+  if (!selectionState) return;
+  const { start, current } = selectionState;
+  const left = Math.min(start.x, current.x);
+  const top = Math.min(start.y, current.y);
+  const right = Math.max(start.x, current.x);
+  const bottom = Math.max(start.y, current.y);
+  const viewportRect = canvasInner.getBoundingClientRect();
+  const zoom = canvasState.settings.zoom ?? 1;
+  const picked = [];
+  canvasNodes.querySelectorAll(".nodeCard").forEach((nodeEl) => {
+    const rect = nodeEl.getBoundingClientRect();
+    const nodeLeft = (rect.left - viewportRect.left) / zoom;
+    const nodeRight = (rect.right - viewportRect.left) / zoom;
+    const nodeTop = (rect.top - viewportRect.top) / zoom;
+    const nodeBottom = (rect.bottom - viewportRect.top) / zoom;
+    const intersects =
+      nodeRight >= left && nodeLeft <= right && nodeBottom >= top && nodeTop <= bottom;
+    if (intersects) {
+      const nodeId = nodeEl.dataset.nodeId;
+      if (nodeId) picked.push(nodeId);
+    }
+  });
+  setSelectedNodes(picked);
+  renderNodes();
+  renderSidebar();
+  selectionState = null;
+  clearSelectionRect();
+}
+
 function getConnectorPosition(nodeId, side) {
   const nodeEl = canvasNodes.querySelector(`.nodeCard[data-node-id="${nodeId}"]`);
   if (!nodeEl) return null;
@@ -1346,6 +1492,19 @@ function getConnectorPosition(nodeId, side) {
   };
 }
 
+function detachConnection(nodeId, side) {
+  if (side === "out") {
+    const outgoing = getOutgoingConnection(nodeId);
+    if (!outgoing) return null;
+    canvasState.connections = canvasState.connections.filter((connection) => connection.from !== nodeId);
+    return outgoing;
+  }
+  const incoming = getIncomingConnection(nodeId);
+  if (!incoming) return null;
+  canvasState.connections = canvasState.connections.filter((connection) => connection.to !== nodeId);
+  return incoming;
+}
+
 function createConnectionPath(start, end, className) {
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
   const { d } = getConnectionPathDefinition(start, end);
@@ -1355,25 +1514,20 @@ function createConnectionPath(start, end, className) {
 }
 
 function getConnectionPathDefinition(start, end) {
-  const deltaX = end.x - start.x;
-  const absDeltaX = Math.abs(deltaX);
-  const minCurve = 120;
-  const curveMagnitude = Math.max(minCurve, absDeltaX * 0.5);
-  const direction = deltaX >= 0 ? 1 : -1;
-  const curve = curveMagnitude * direction;
-  const c1x = start.x + curve;
-  const c2x = end.x + curve;
-  const d = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
-  return { d, c1x, c2x };
+  const midX = (start.x + end.x) / 2;
+  const d = `M ${start.x} ${start.y} L ${midX} ${start.y} L ${midX} ${end.y} L ${end.x} ${end.y}`;
+  return { d };
 }
 
 function startConnectionDrag(nodeId, side, event) {
   const start = getConnectorPosition(nodeId, side);
   if (!start) return;
+  const detached = detachConnection(nodeId, side);
   connectionDrag = {
     nodeId,
     side,
     start,
+    detached,
     current: getCanvasPoint(event.clientX, event.clientY),
     snapPoint: null
   };
@@ -1485,7 +1639,7 @@ canvasZoomOutBtn.addEventListener("click", () => updateZoom(-0.1));
 canvasFrameBtn.addEventListener("click", frameAllNodes);
 
 sidebarCloseBtn.addEventListener("click", () => {
-  selectedNodeId = null;
+  clearSelection();
   renderSidebar();
   render();
 });
@@ -1513,6 +1667,14 @@ canvasPlayBtn.addEventListener("click", async () => {
   showStatus("▶️ Running flow…", 1200);
 });
 
+canvasRunFromBtn.addEventListener("click", async () => {
+  if (!selectedNodeId) {
+    showStatus("⚠️ Select a node to run from");
+    return;
+  }
+  await runFromNode(selectedNodeId);
+});
+
 canvasPauseBtn.addEventListener("click", async () => {
   await chrome.runtime.sendMessage({ type: "PAUSE_FLOW" });
   runState.status = "paused";
@@ -1532,15 +1694,30 @@ canvasStopBtn.addEventListener("click", async () => {
 canvasViewport.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
   if (e.target.closest(".nodeCard, .nodeConnector, button, input, textarea, select")) return;
-  panState = {
-    startX: e.clientX,
-    startY: e.clientY,
-    scrollLeft: canvasViewport.scrollLeft,
-    scrollTop: canvasViewport.scrollTop
-  };
-  canvasViewport.classList.add("panning");
-  document.body.style.cursor = "grabbing";
+  if (e.shiftKey) {
+    const point = getCanvasPoint(e.clientX, e.clientY);
+    selectionState = { start: point, current: point };
+    updateSelectionRect();
+  } else {
+    panState = {
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollLeft: canvasViewport.scrollLeft,
+      scrollTop: canvasViewport.scrollTop
+    };
+    canvasViewport.classList.add("panning");
+    document.body.style.cursor = "grabbing";
+  }
   e.preventDefault();
+});
+
+canvasViewport.addEventListener("click", (e) => {
+  if (suppressCanvasClick) return;
+  if (e.target.closest(".nodeCard, .nodeConnector, button, input, textarea, select")) return;
+  if (selectedNodeIds.size) {
+    clearSelection();
+    render();
+  }
 });
 
 canvasViewport.addEventListener(
@@ -1574,6 +1751,11 @@ window.addEventListener("mousemove", (e) => {
     canvasViewport.scrollLeft = panState.scrollLeft - dx;
     canvasViewport.scrollTop = panState.scrollTop - dy;
   }
+  if (selectionState) {
+    selectionState.current = getCanvasPoint(e.clientX, e.clientY);
+    updateSelectionRect();
+    return;
+  }
   if (!connectionDrag) return;
   const point = getCanvasPoint(e.clientX, e.clientY);
   connectionDrag.current = point;
@@ -1601,16 +1783,30 @@ window.addEventListener("mouseup", async () => {
     panState = null;
     canvasViewport.classList.remove("panning");
     document.body.style.cursor = "";
+    suppressCanvasClick = true;
+    window.setTimeout(() => {
+      suppressCanvasClick = false;
+    }, 0);
+  }
+  if (selectionState) {
+    finalizeSelection();
+    suppressCanvasClick = true;
+    window.setTimeout(() => {
+      suppressCanvasClick = false;
+    }, 0);
+    return;
   }
   if (!connectionDrag) return;
   const target = snapTarget;
   const startNode = getNodeById(connectionDrag.nodeId);
   const targetNode = target ? getNodeById(target.nodeId) : null;
   const startSide = connectionDrag.side;
+  const detached = connectionDrag.detached;
   connectionDrag = null;
   updateSnapTarget(null);
   if (!startNode || !targetNode || startNode.id === targetNode.id) {
-    renderConnections();
+    if (detached) await saveCanvasState();
+    render();
     return;
   }
 
@@ -1624,7 +1820,8 @@ window.addEventListener("mouseup", async () => {
     toNode = startNode;
   }
   if (fromNode.kind === "end" || toNode.kind === "start") {
-    renderConnections();
+    if (detached) await saveCanvasState();
+    render();
     return;
   }
   connectNodes(fromNode.id, toNode.id);
@@ -1652,7 +1849,9 @@ chrome.runtime.onMessage.addListener((msg) => {
     const firstConnection = startNode ? getOutgoingConnection(startNode.id) : null;
     const firstNode = firstConnection ? getNodeById(firstConnection.to) : null;
     if (startNode && firstNode) {
-      updateRunnerAnimation(startNode, firstNode);
+      getGlobalDelayMs().then((delayMs) => {
+        scheduleRunnerAnimation(startNode, firstNode, delayMs);
+      });
     }
   }
 
@@ -1684,7 +1883,9 @@ chrome.runtime.onMessage.addListener((msg) => {
     const lastAction = flowActions.length ? flowActions[flowActions.length - 1] : null;
     const lastNode = lastAction ? getNodeByActionId(lastAction.id) : getStartNode();
     if (lastNode && endNode) {
-      updateRunnerAnimation(lastNode, endNode);
+      getGlobalDelayMs().then((delayMs) => {
+        scheduleRunnerAnimation(lastNode, endNode, delayMs);
+      });
     }
   }
 
@@ -1715,6 +1916,12 @@ async function init() {
     canvasState = buildCanvasFromActions(res.autolineState?.actions ?? [], res.autolineState?.workflowName ?? "Workflow");
   }
   normalizeCanvasState();
+  if (!selectionRect) {
+    selectionRect = document.createElement("div");
+    selectionRect.className = "selectionRect";
+    selectionRect.style.display = "none";
+    canvasInner.appendChild(selectionRect);
+  }
   await loadWorkflows();
   render();
 }
