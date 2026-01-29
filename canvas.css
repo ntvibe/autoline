@@ -1,25 +1,56 @@
 :root {
   color-scheme: light dark;
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
-  --bg: #0f1115;
-  --card: rgba(25, 27, 36, 0.85);
-  --card-border: rgba(255, 255, 255, 0.08);
-  --text: #f5f6f8;
-  --muted: #a1a7b3;
-  --primary: #7c6cff;
-  --accent: #3dd598;
-  --danger: #ff5c77;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  --bg: #f6f6f6;
+  --panel: rgba(255, 255, 255, 0.75);
+  --card: rgba(255, 255, 255, 0.68);
+  --card-border: rgba(0, 0, 0, 0.16);
+  --text: #0b0b0b;
+  --muted: #4a4a4a;
+  --line: rgba(0, 0, 0, 0.16);
+  --primary: #111111;
+  --accent: #111111;
+  --accent-rgb: 17, 17, 17;
+  --danger: #b00020;
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.12);
+  --radius: 14px;
+  --radius2: 18px;
+  --glass: blur(16px);
+  --grid-dot: rgba(17, 17, 17, 0.14);
 }
 
-html[data-theme="light"] {
-  --bg: #f5f6f8;
-  --card: rgba(255, 255, 255, 0.9);
-  --card-border: rgba(30, 35, 45, 0.08);
-  --text: #1e222a;
-  --muted: #5d6472;
-  --primary: #5f4bff;
-  --accent: #1dbf73;
-  --danger: #d7465f;
+html[data-theme="dark"] {
+  --bg: #070707;
+  --panel: rgba(16, 16, 16, 0.82);
+  --card: rgba(20, 20, 20, 0.75);
+  --card-border: rgba(255, 255, 255, 0.18);
+  --text: #f7f7f7;
+  --muted: #b5b5b5;
+  --line: rgba(255, 255, 255, 0.18);
+  --primary: #ffffff;
+  --accent: #ffffff;
+  --accent-rgb: 255, 255, 255;
+  --danger: #ff4d4d;
+  --shadow: 0 20px 45px rgba(0, 0, 0, 0.5);
+  --grid-dot: rgba(255, 255, 255, 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-theme="auto"] {
+    --bg: #070707;
+    --panel: rgba(16, 16, 16, 0.82);
+    --card: rgba(20, 20, 20, 0.75);
+    --card-border: rgba(255, 255, 255, 0.18);
+    --text: #f7f7f7;
+    --muted: #b5b5b5;
+    --line: rgba(255, 255, 255, 0.18);
+    --primary: #ffffff;
+    --accent: #ffffff;
+    --accent-rgb: 255, 255, 255;
+    --danger: #ff4d4d;
+    --shadow: 0 20px 45px rgba(0, 0, 0, 0.5);
+    --grid-dot: rgba(255, 255, 255, 0.14);
+  }
 }
 
 body {
@@ -40,9 +71,9 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  background: rgba(12, 13, 17, 0.75);
-  backdrop-filter: blur(18px);
-  border-bottom: 1px solid var(--card-border);
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.06), rgba(var(--accent-rgb), 0.02));
+  backdrop-filter: var(--glass);
+  border-bottom: 1px solid var(--line);
 }
 
 .brand {
@@ -54,9 +85,9 @@ body {
 .logo {
   width: 36px;
   height: 36px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #7c6cff, #3dd598);
-  color: #fff;
+  border-radius: 10px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--text);
   display: grid;
   place-items: center;
   font-weight: 700;
@@ -80,8 +111,8 @@ body {
 }
 
 .iconBtn {
-  border: 1px solid var(--card-border);
-  background: var(--card);
+  border: 1px solid var(--line);
+  background: rgba(var(--accent-rgb), 0.04);
   color: var(--text);
   border-radius: 10px;
   width: 36px;
@@ -98,11 +129,11 @@ body {
 
 .iconBtn:hover,
 .btn:hover {
-  border-color: rgba(124, 108, 255, 0.5);
+  border-color: rgba(var(--accent-rgb), 0.3);
 }
 
 .btn {
-  border: 1px solid var(--card-border);
+  border: 1px solid var(--line);
   background: var(--card);
   color: var(--text);
   border-radius: 10px;
@@ -114,13 +145,13 @@ body {
 .btn.primary {
   background: var(--primary);
   border-color: transparent;
-  color: #fff;
+  color: var(--bg);
 }
 
 .divider {
   width: 1px;
   height: 28px;
-  background: var(--card-border);
+  background: var(--line);
   margin: 0 4px;
 }
 
@@ -157,7 +188,7 @@ body {
 }
 
 .workflowNameInput:focus {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 
 .status {
@@ -171,11 +202,17 @@ body {
 
 .canvasViewport {
   flex: 1;
-  background: rgba(10, 12, 16, 0.55);
-  border: 1px solid var(--card-border);
+  background-color: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 16px;
   position: relative;
   overflow: auto;
+  background-image: radial-gradient(circle at 1px 1px, var(--grid-dot) 1px, transparent 0);
+  background-size: 20px 20px;
+}
+
+.canvasViewport.panning {
+  cursor: grabbing;
 }
 
 .canvasInner {
@@ -203,20 +240,21 @@ body {
   position: absolute;
   width: 200px;
   background: var(--card);
-  border: 1px solid var(--card-border);
-  border-radius: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius2);
   padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   cursor: grab;
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow);
   overflow: visible;
+  backdrop-filter: var(--glass);
 }
 
 .nodeCard.running {
   border-color: var(--accent);
-  box-shadow: 0 0 18px rgba(61, 213, 152, 0.45);
+  box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.3);
   animation: pulseGlow 1.2s ease-in-out infinite;
 }
 
@@ -229,11 +267,25 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  cursor: pointer;
+}
+
+.nodeHeaderMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
 }
 
 .nodeTitle {
   font-weight: 600;
   font-size: 14px;
+}
+
+.nodeSub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
 }
 
 .nodeTag {
@@ -244,6 +296,23 @@ body {
 .nodeActions {
   display: flex;
   gap: 6px;
+}
+
+.nodeActionBtn {
+  border: 1px solid transparent;
+  background: rgba(var(--accent-rgb), 0.04);
+  color: inherit;
+  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.nodeActionBtn:hover {
+  border-color: rgba(var(--accent-rgb), 0.3);
+  background: rgba(var(--accent-rgb), 0.1);
 }
 
 .nodeExpand {
@@ -270,10 +339,10 @@ body {
 .nodeBody textarea {
   width: 100%;
   border-radius: 8px;
-  border: 1px solid var(--card-border);
+  border: 1px solid var(--line);
   padding: 6px 8px;
   font-size: 12px;
-  background: rgba(8, 10, 14, 0.7);
+  background: rgba(var(--accent-rgb), 0.06);
   color: var(--text);
 }
 
@@ -308,8 +377,8 @@ body {
   width: 14px;
   height: 14px;
   border-radius: 999px;
-  border: 2px solid rgba(124, 108, 255, 0.85);
-  background: var(--bg);
+  border: 2px solid rgba(var(--accent-rgb), 0.85);
+  background: var(--panel);
   top: 50%;
   transform: translateY(-50%);
   cursor: crosshair;
@@ -327,11 +396,11 @@ body {
 }
 
 .nodeConnector.snap {
-  box-shadow: 0 0 12px rgba(124, 108, 255, 0.8);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.5);
 }
 
 .connection-path {
-  stroke: rgba(124, 108, 255, 0.7);
+  stroke: rgba(var(--accent-rgb), 0.65);
   stroke-width: 2.5;
   fill: none;
   stroke-linecap: round;
@@ -340,7 +409,7 @@ body {
 }
 
 .connection-path.preview {
-  stroke: rgba(124, 108, 255, 0.5);
+  stroke: rgba(var(--accent-rgb), 0.4);
   stroke-dasharray: 6 10;
 }
 
@@ -355,13 +424,13 @@ body {
 
 @keyframes pulseGlow {
   0% {
-    box-shadow: 0 0 10px rgba(61, 213, 152, 0.2);
+    box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.2);
   }
   50% {
-    box-shadow: 0 0 22px rgba(61, 213, 152, 0.6);
+    box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.4);
   }
   100% {
-    box-shadow: 0 0 10px rgba(61, 213, 152, 0.2);
+    box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.2);
   }
 }
 
@@ -378,8 +447,8 @@ body {
 }
 
 .nodeSidebar {
-  border-left: 1px solid var(--card-border);
-  background: rgba(12, 14, 20, 0.85);
+  border-left: 1px solid var(--line);
+  background: var(--panel);
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -411,10 +480,10 @@ body {
 }
 
 .optionsCard {
-  border: 1px solid var(--card-border);
+  border: 1px solid var(--line);
   border-radius: 12px;
   padding: 12px;
-  background: rgba(15, 17, 23, 0.7);
+  background: var(--card);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -431,9 +500,9 @@ body {
 .optionRow select,
 .optionRow textarea {
   border-radius: 8px;
-  border: 1px solid var(--card-border);
+  border: 1px solid var(--line);
   padding: 6px 8px;
-  background: rgba(8, 10, 14, 0.7);
+  background: rgba(var(--accent-rgb), 0.06);
   color: var(--text);
   font-size: 12px;
 }
@@ -492,17 +561,17 @@ body {
 }
 
 .nodeItem {
-  border: 1px solid var(--card-border);
+  border: 1px solid var(--line);
   border-radius: 12px;
   padding: 10px 12px;
-  background: rgba(10, 12, 16, 0.7);
+  background: var(--card);
   color: var(--text);
   text-align: left;
   cursor: pointer;
 }
 
 .nodeItem:hover {
-  border-color: rgba(124, 108, 255, 0.6);
+  border-color: rgba(var(--accent-rgb), 0.35);
 }
 
 .formRow {
@@ -523,7 +592,7 @@ body {
 }
 
 .workflowItem {
-  border: 1px solid var(--card-border);
+  border: 1px solid var(--line);
   border-radius: 12px;
   padding: 10px 12px;
   display: flex;

@@ -81,6 +81,7 @@ let canvasState = {
 let workflows = [];
 let selectedNodeId = null;
 let dragState = null;
+let panState = null;
 let connectionDrag = null;
 let snapTarget = null;
 let workflowMode = "open";
@@ -91,6 +92,7 @@ let runState = {
 };
 let animationFrame = null;
 let ignoreStorageUpdate = false;
+let zoomSaveTimer = null;
 
 function uid() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
@@ -570,7 +572,7 @@ function renderAddNodeList() {
 function render() {
   workflowNameInput.value = canvasState.workflowName || "Workflow";
   applyTheme(canvasState.settings.themeMode ?? "auto");
-  canvasInner.style.transform = `scale(${canvasState.settings.zoom ?? 1})`;
+  applyZoom(canvasState.settings.zoom ?? 1);
 
   renderNodes();
   renderConnections();
@@ -579,7 +581,6 @@ function render() {
 
 function renderNodes() {
   canvasNodes.innerHTML = "";
-  const nodeMap = new Map();
 
   canvasState.nodes.forEach((node) => {
     const nodeEl = document.createElement("div");
@@ -595,20 +596,25 @@ function renderNodes() {
     header.className = "nodeHeader";
 
     const titleWrap = document.createElement("div");
+    titleWrap.className = "nodeHeaderMain";
     const title = document.createElement("div");
     title.className = "nodeTitle";
-    title.textContent = node.kind === "action" ? node.label : node.label;
-    const tag = document.createElement("div");
-    tag.className = "nodeTag";
-    tag.textContent = node.kind === "action" ? "Action" : "System";
+    title.textContent = node.kind === "action" ? getActionTitle(node.action) : node.label;
+    const sub = document.createElement("div");
+    sub.className = "nodeSub";
+    if (node.kind === "action") {
+      sub.textContent = getActionSummary(node.action);
+    } else {
+      sub.textContent = node.kind === "start" ? "Start of the flow" : "End of the flow";
+    }
     titleWrap.appendChild(title);
-    titleWrap.appendChild(tag);
+    titleWrap.appendChild(sub);
 
     const actions = document.createElement("div");
     actions.className = "nodeActions";
 
     const expandBtn = document.createElement("button");
-    expandBtn.className = "nodeExpand";
+    expandBtn.className = "nodeActionBtn";
     expandBtn.innerHTML = `<span class="material-icons" aria-hidden="true">${node.expanded ? "expand_less" : "chevron_right"}</span>`;
     expandBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -619,8 +625,19 @@ function renderNodes() {
     actions.appendChild(expandBtn);
 
     if (node.kind === "action") {
+      const duplicateBtn = document.createElement("button");
+      duplicateBtn.className = "nodeActionBtn";
+      duplicateBtn.innerHTML = '<span class="material-icons" aria-hidden="true">content_copy</span>';
+      duplicateBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await duplicateNode(node.id);
+        render();
+        showStatus("📄 Node duplicated");
+      });
+      actions.appendChild(duplicateBtn);
+
       const deleteBtn = document.createElement("button");
-      deleteBtn.className = "nodeExpand";
+      deleteBtn.className = "nodeActionBtn";
       deleteBtn.innerHTML = '<span class="material-icons" aria-hidden="true">delete</span>';
       deleteBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -634,6 +651,11 @@ function renderNodes() {
 
     header.appendChild(titleWrap);
     header.appendChild(actions);
+    header.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      node.expanded = !node.expanded;
+      render();
+    });
 
     const body = document.createElement("div");
     body.className = "nodeBody";
@@ -684,12 +706,14 @@ function renderNodes() {
       if (e.target.closest("input, textarea, select, button")) return;
       dragState = {
         nodeId: node.id,
+        nodeEl,
         startX: e.clientX,
         startY: e.clientY,
         originX: node.position?.x ?? 0,
         originY: node.position?.y ?? 0
       };
       nodeEl.style.cursor = "grabbing";
+      document.body.style.cursor = "grabbing";
       e.stopPropagation();
     });
 
@@ -700,16 +724,12 @@ function renderNodes() {
     });
 
     canvasNodes.appendChild(nodeEl);
-    nodeMap.set(node.id, nodeEl);
   });
 }
 
 function renderConnections() {
   canvasLines.innerHTML = "";
   canvasRunner.innerHTML = "";
-  const nodeElements = Array.from(canvasNodes.children);
-  const nodeById = new Map();
-  nodeElements.forEach((el) => nodeById.set(getNodeIdFromElement(el), el));
 
   canvasState.connections.forEach((connection) => {
     const fromNode = getNodeById(connection.from);
@@ -780,8 +800,120 @@ function renderSidebar() {
   }
 }
 
-function getNodeIdFromElement(el) {
-  return el.dataset.nodeId;
+function getActionTitle(action) {
+  if (!action) return "Action";
+  const map = {
+    switchTab: "Switch Tab",
+    delay: "Delay",
+    openUrl: "Open URL",
+    click: "Click",
+    reloadTab: "Reload Tab",
+    simpleLoop: "Simple Loop",
+    textBlocks: "Text Blocks",
+    clipboard: "Clipboard",
+    keyboard: "Keyboard",
+    sheetsCheckValue: "Sheets Check Value",
+    sheetsCopy: "Sheets Copy",
+    sheetsPaste: "Sheets Paste",
+    higgsfieldAi: "Higgsfield AI"
+  };
+  return map[action.type] || action.type || "Action";
+}
+
+function getActionSummary(action) {
+  if (!action) return "Action";
+  if (action.type === "switchTab") {
+    return action.tab ? `• ${truncate(action.tab.title || action.tab.url || "Tab")}` : "• not set";
+  }
+  if (action.type === "delay") {
+    return `• ${Number(action.delaySec ?? 1)} sec`;
+  }
+  if (action.type === "openUrl") {
+    return action.url ? `• ${truncate(action.url, 32)}` : "• not set";
+  }
+  if (action.type === "click") {
+    return action.target ? `• ${truncate(action.target.label || "target", 32)}` : "• not set";
+  }
+  if (action.type === "reloadTab") {
+    return "• active tab";
+  }
+  if (action.type === "simpleLoop") {
+    const loops = Number.isFinite(action.loopCount) ? Math.max(1, Math.round(action.loopCount)) : 1;
+    return `${action.enabled ? "• enabled" : "• disabled"} • loops: ${loops}`;
+  }
+  if (action.type === "textBlocks") {
+    const total = Array.isArray(action.blocks) ? action.blocks.length : 0;
+    const used = Array.isArray(action.blocks) ? action.blocks.filter((block) => block.enabled === false).length : 0;
+    return total > 0 ? `• ${used}/${total} used` : "• no blocks";
+  }
+  if (action.type === "clipboard") {
+    return action.mode === "paste" ? "• paste clipboard" : "• copy selection";
+  }
+  if (action.type === "keyboard") {
+    const label = {
+      ctrlA: "Ctrl+A",
+      ctrlC: "Ctrl+C",
+      ctrlV: "Ctrl+V",
+      delete: "Delete",
+      backspace: "Backspace",
+      arrowUp: "Arrow Up",
+      arrowDown: "Arrow Down",
+      arrowLeft: "Arrow Left",
+      arrowRight: "Arrow Right",
+      enter: "Enter",
+      escape: "Esc"
+    }[action.key];
+    return `• ${label || "key"} ×${Number(action.pressCount ?? 1)}`;
+  }
+  if (action.type === "sheetsCheckValue") {
+    const cellLabel = action.cellRef ? ` ${action.cellRef}` : " selection";
+    const expectedLabel = action.expectedValue ? ` = "${truncate(action.expectedValue, 18)}"` : "";
+    return `•${cellLabel}${expectedLabel}`;
+  }
+  if (action.type === "sheetsCopy") {
+    return "• copy active cell";
+  }
+  if (action.type === "sheetsPaste") {
+    return "• paste runtime clipboard";
+  }
+  if (action.type === "higgsfieldAi") {
+    const threshold = Number.isFinite(action.threshold) ? action.threshold : DEFAULT_HIGGSFIELD_CONFIG.threshold;
+    const phraseCount = Array.isArray(action.activePhrases) ? action.activePhrases.length : 0;
+    return `• max ${threshold} • ${phraseCount} active phrase${phraseCount === 1 ? "" : "s"}`;
+  }
+  return "Action";
+}
+
+function truncate(text, max = 24) {
+  const value = String(text ?? "");
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
+
+async function duplicateNode(nodeId) {
+  const node = getNodeById(nodeId);
+  if (!node || node.kind !== "action") return;
+  const clonedAction = JSON.parse(JSON.stringify(node.action));
+  clonedAction.id = uid();
+  clonedAction.jsonOpen = false;
+  const newNode = {
+    id: uid(),
+    kind: "action",
+    label: clonedAction.type,
+    action: clonedAction,
+    position: { x: (node.position?.x ?? 0) + 220, y: node.position?.y ?? 0 },
+    expanded: node.expanded
+  };
+  canvasState.nodes.push(newNode);
+  const outgoing = getOutgoingConnection(nodeId);
+  connectNodes(nodeId, newNode.id);
+  if (outgoing) {
+    connectNodes(newNode.id, outgoing.to);
+  } else {
+    const endNode = getEndNode();
+    if (endNode) connectNodes(newNode.id, endNode.id);
+  }
+  await saveCanvasState();
 }
 
 function renderNodeOptionsContent(container, node, compact) {
@@ -1102,10 +1234,9 @@ async function runFromNode(nodeId) {
   showStatus("▶️ Running from selected node…", 1200);
 }
 
-function updateZoom(delta) {
-  const nextZoom = Math.min(2.5, Math.max(0.4, (canvasState.settings.zoom ?? 1) + delta));
-  canvasState.settings.zoom = Number(nextZoom.toFixed(2));
-  persistAndRender();
+function updateZoom(delta, anchor = null) {
+  const nextZoom = (canvasState.settings.zoom ?? 1) + delta;
+  setZoom(nextZoom, anchor, true);
 }
 
 function frameAllNodes() {
@@ -1140,7 +1271,7 @@ function updateRunnerAnimation(fromNode, toNode) {
 
   const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
   circle.setAttribute("r", "6");
-  circle.setAttribute("fill", "#3dd598");
+  circle.setAttribute("fill", "var(--accent)");
   canvasRunner.appendChild(circle);
 
   const duration = canvasState.settings.runSpeedMs ?? 800;
@@ -1160,6 +1291,36 @@ function updateRunnerAnimation(fromNode, toNode) {
   }
 
   animationFrame = requestAnimationFrame(step);
+}
+
+function applyZoom(zoom) {
+  canvasInner.style.transform = `scale(${zoom})`;
+}
+
+function scheduleZoomSave() {
+  if (zoomSaveTimer) window.clearTimeout(zoomSaveTimer);
+  zoomSaveTimer = window.setTimeout(() => {
+    saveCanvasState();
+    zoomSaveTimer = null;
+  }, 250);
+}
+
+function setZoom(nextZoom, anchor = null, persist = false) {
+  const currentZoom = canvasState.settings.zoom ?? 1;
+  const clamped = Math.min(2.5, Math.max(0.4, nextZoom));
+  if (Math.abs(clamped - currentZoom) < 0.001) return;
+  canvasState.settings.zoom = Number(clamped.toFixed(3));
+  if (anchor) {
+    const rect = canvasViewport.getBoundingClientRect();
+    const offsetX = (anchor.x - rect.left + canvasViewport.scrollLeft) / currentZoom;
+    const offsetY = (anchor.y - rect.top + canvasViewport.scrollTop) / currentZoom;
+    applyZoom(canvasState.settings.zoom);
+    canvasViewport.scrollLeft = offsetX * canvasState.settings.zoom - (anchor.x - rect.left);
+    canvasViewport.scrollTop = offsetY * canvasState.settings.zoom - (anchor.y - rect.top);
+  } else {
+    applyZoom(canvasState.settings.zoom);
+  }
+  if (persist) scheduleZoomSave();
 }
 
 function getCanvasPoint(clientX, clientY) {
@@ -1198,10 +1359,10 @@ function getConnectionPathDefinition(start, end) {
   const absDeltaX = Math.abs(deltaX);
   const minCurve = 120;
   const curveMagnitude = Math.max(minCurve, absDeltaX * 0.5);
-  const direction = absDeltaX < 30 ? 1 : Math.sign(deltaX) || 1;
+  const direction = deltaX >= 0 ? 1 : -1;
   const curve = curveMagnitude * direction;
   const c1x = start.x + curve;
-  const c2x = end.x - curve;
+  const c2x = end.x + curve;
   const d = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
   return { d, c1x, c2x };
 }
@@ -1368,17 +1529,51 @@ canvasStopBtn.addEventListener("click", async () => {
   showStatus("⏹️ Stopped");
 });
 
-canvasViewport.addEventListener("mousemove", (e) => {
-  if (!dragState) return;
-  const dx = (e.clientX - dragState.startX) / (canvasState.settings.zoom ?? 1);
-  const dy = (e.clientY - dragState.startY) / (canvasState.settings.zoom ?? 1);
-  const node = getNodeById(dragState.nodeId);
-  if (!node) return;
-  node.position = { x: dragState.originX + dx, y: dragState.originY + dy };
-  renderConnections();
+canvasViewport.addEventListener("mousedown", (e) => {
+  if (e.button !== 0) return;
+  if (e.target.closest(".nodeCard, .nodeConnector, button, input, textarea, select")) return;
+  panState = {
+    startX: e.clientX,
+    startY: e.clientY,
+    scrollLeft: canvasViewport.scrollLeft,
+    scrollTop: canvasViewport.scrollTop
+  };
+  canvasViewport.classList.add("panning");
+  document.body.style.cursor = "grabbing";
+  e.preventDefault();
 });
 
+canvasViewport.addEventListener(
+  "wheel",
+  (e) => {
+    if (!e.deltaY) return;
+    e.preventDefault();
+    const delta = -e.deltaY * 0.0015;
+    setZoom((canvasState.settings.zoom ?? 1) + delta, { x: e.clientX, y: e.clientY }, true);
+  },
+  { passive: false }
+);
+
 window.addEventListener("mousemove", (e) => {
+  if (dragState) {
+    const dx = (e.clientX - dragState.startX) / (canvasState.settings.zoom ?? 1);
+    const dy = (e.clientY - dragState.startY) / (canvasState.settings.zoom ?? 1);
+    const node = getNodeById(dragState.nodeId);
+    if (node) {
+      node.position = { x: dragState.originX + dx, y: dragState.originY + dy };
+      if (dragState.nodeEl) {
+        dragState.nodeEl.style.left = `${node.position.x}px`;
+        dragState.nodeEl.style.top = `${node.position.y}px`;
+      }
+      renderConnections();
+    }
+  }
+  if (panState) {
+    const dx = e.clientX - panState.startX;
+    const dy = e.clientY - panState.startY;
+    canvasViewport.scrollLeft = panState.scrollLeft - dx;
+    canvasViewport.scrollTop = panState.scrollTop - dy;
+  }
   if (!connectionDrag) return;
   const point = getCanvasPoint(e.clientX, e.clientY);
   connectionDrag.current = point;
@@ -1394,19 +1589,18 @@ window.addEventListener("mousemove", (e) => {
   renderConnections();
 });
 
-canvasViewport.addEventListener("mouseup", async () => {
-  if (!dragState) return;
-  dragState = null;
-  await saveCanvasState();
-  render();
-});
-
 window.addEventListener("mouseup", async () => {
   if (dragState) {
     dragState = null;
+    document.body.style.cursor = "";
     await saveCanvasState();
     render();
     return;
+  }
+  if (panState) {
+    panState = null;
+    canvasViewport.classList.remove("panning");
+    document.body.style.cursor = "";
   }
   if (!connectionDrag) return;
   const target = snapTarget;
@@ -1454,6 +1648,12 @@ chrome.runtime.onMessage.addListener((msg) => {
     runState.currentActionId = null;
     runState.doneActionIds = new Set();
     render();
+    const startNode = getStartNode();
+    const firstConnection = startNode ? getOutgoingConnection(startNode.id) : null;
+    const firstNode = firstConnection ? getNodeById(firstConnection.to) : null;
+    if (startNode && firstNode) {
+      updateRunnerAnimation(startNode, firstNode);
+    }
   }
 
   if (msg?.type === "FLOW_STEP_START") {
@@ -1479,6 +1679,13 @@ chrome.runtime.onMessage.addListener((msg) => {
     runState.doneActionIds = new Set();
     render();
     showStatus("✅ Flow complete");
+    const endNode = getEndNode();
+    const flowActions = getFlowActionsFromCanvas();
+    const lastAction = flowActions.length ? flowActions[flowActions.length - 1] : null;
+    const lastNode = lastAction ? getNodeByActionId(lastAction.id) : getStartNode();
+    if (lastNode && endNode) {
+      updateRunnerAnimation(lastNode, endNode);
+    }
   }
 
   if (msg?.type === "FLOW_PAUSE") {
